@@ -1,0 +1,70 @@
+[project]
+name = "karamel-api"
+version = "0.1.0"
+description = "Карамель 2.0 — API (FastAPI, async SQLAlchemy)"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastapi==0.156.2",
+    "uvicorn[standard]==0.54.0",
+    "sqlalchemy[asyncio]==2.1.5",
+    "asyncpg==0.32.0",
+    "alembic==1.20.0",
+    "pydantic-settings==2.16.1",
+    "structlog==26.1.0",
+    "cryptography==50.0.2",
+    "pyjwt==2.15.1",
+    "redis==8.1.0",
+    "httpx==0.28.1",
+    # Стори 2.2 (Task 10.5): multipart-парсер FastAPI — без него `UploadFile`
+    # роняет маршрут загрузки фото на старте.
+    "python-multipart==0.0.32",
+    # Стори 2.2 (D-2): S3-клиент. Версия проверена `pip download`.
+    "boto3==1.43.117",
+    # Стори 2.2 (Task 10.5): `anyio` используется напрямую в `media_service`
+    # (`to_thread.run_sync`), а не только транзитивно через FastAPI.
+    "anyio==4.15.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.17.1",
+    "mypy==2.4.0",
+]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = { find = { include = ["app*"] } }
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_ignores = true
+
+# Стори 2.2 (Task 10.6): у `boto3`/`botocore` нет `py.typed` и нет стабов.
+# При `strict = true` mypy падает на `import boto3` с «module is installed,
+# but missing library stubs», и шаг валидации недостижим. Игнорируются только
+# импорты: собственный код остаётся под полной строгостью.
+[[tool.mypy.overrides]]
+module = ["boto3.*", "botocore.*", "botocore.exceptions.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: требует реальный PostgreSQL и DATABASE_URL в окружении",
+    "multiprocess: поднимает два процесса uvicorn на портах 8101/8102 (Chore P-6, O4)",
+    "perf: замеряет тайминги и не блокирует PR (TD 6.5, W18)",
+]

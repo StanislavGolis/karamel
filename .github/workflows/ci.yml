@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  web:
+    name: Web — lint, types, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      # Chore P-5 (решение эпика 6 п.6): UI-тесты Vitest. Шаг стоит ДО сборки:
+      # `next build` — самый дорогой шаг job'а, и падение поведения (скелетоны,
+      # XSS, отмена запроса, идемпотентная отправка) должно обнаруживаться
+      # раньше, а не после трёх минут компиляции.
+      - run: npm run test:run
+      # Гейты дизайн-системы (design-system-v2-action-first.md §14.4-14.7).
+      # Стоят ДО сборки по той же причине, что и тесты: `next build` — самый
+      # дорогой шаг job'а, а hex в компоненте и провал контраста находятся
+      # скриптом за доли секунды.
+      #
+      # Почему это шаги CI, а не ESLint-правило: §14.4 требует гейт в CI
+      # («предупреждение в 51 месте не читают»), а pre-commit не заводится —
+      # в package.json нет husky/lint-staged (ревью Н-14).
+      #
+      # `working-directory` job'а — apps/web, скрипты лежат в karamel/scripts:
+      # пути считаются от корня репозитория явно, иначе шаг упадёт на «no such file».
+      - name: Гейт 1 — hex и произвольные цвета в компонентах
+        run: node ../../scripts/design/gate1-hex.mjs
+      - name: Гейт 2 — контраст светлой темы
+        run: node ../../scripts/design/gate2-contrast-light.mjs
+      - name: Гейт 3 — каждый токен имеет пару в тёмной теме
+        run: node ../../scripts/design/gate3-pairs.mjs
+      - name: Гейт 4 — контраст обеих тем
+        run: node ../../scripts/design/gate4-contrast-both.mjs
+      - run: npm run build
+
+  api:
+    name: API — lint, types, tests (real PostgreSQL)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    # Postgres поднят как сервис: без него интеграционные тесты скипаются,
+    # и job становится зелёным без единой проверки схемы, репозиториев и каскада.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: karamel
+          POSTGRES_PASSWORD: karamel_pass
+          POSTGRES_DB: karamel_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      # CR 1.4, Решение 3: Redis нужен integration-тестам боевого
+      # `RedisSmsStore` (Lua consume_code, SET NX + INCR, expire(nx=True), bytes).
+      # Без сервиса они скипаются, и 344 строки боевого кода остаются
+      # непроверенными — именно так дефект `bytes` пережил первый прогон 1.4.
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://karamel:karamel_pass@127.0.0.1:5432/karamel_db
+      REDIS_URL: redis://127.0.0.1:6379/0
+      ENV: test
+      # Стори 1.4: `_validate_secrets` падает на коротком/дефолтном секрете,
+      # поэтому CI задаёт фиктивные, но достаточной длины значения.
+      JWT_SECRET: ci_jwt_secret_32_chars_minimum_000
+      SMS_CODE_SECRET: ci_sms_secret_32_chars_minimum_00
+      SMS_PROVIDER: stub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: python -m mypy app
+      # --strict-markers: опечатка в маркере (`integratio`) падает, а не молчит.
+      # -m integration без skip: если бы тесты скипнулись, job должен упасть, а не пройти.
+      - run: python -m pytest -q --strict-markers
+      - name: Проверка, что интеграционные тесты не скипнуты
+        run: |
+          python -m pytest -q -m integration --no-header 2>&1 | tee /tmp/it.log
+          if grep -q "skipped" /tmp/it.log; then
+            echo "Интеграционные тесты скипнуты — схема не проверена"
+            exit 1
+          fi
+
+  migrations:
+    name: Migrations — upgrade / downgrade / upgrade
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: karamel
+          POSTGRES_PASSWORD: karamel_pass
+          POSTGRES_DB: karamel_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://karamel:karamel_pass@127.0.0.1:5432/karamel_db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -e ".[dev]"
+      - run: python -m alembic upgrade head
+      - run: python -m alembic downgrade base
+      - run: python -m alembic upgrade head
+      - run: python -m alembic check
+
+  compose:
+    name: Compose — синтаксис
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config -q

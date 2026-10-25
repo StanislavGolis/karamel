@@ -1,0 +1,204 @@
+@import "tailwindcss";
+/* Нужны для Radix-примитивов: @custom-variant data-open/data-closed/data-checked
+   и @keyframes accordion-*. Проверено: --color-* в этом файле НЕТ (0 совпадений),
+   значит импорт не переопределяет наши токены. */
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* ============================================================================
+   КАРАМЕЛЬ — ДИЗАЙН-СИСТЕМА v2.3.0 «action-first»
+   Волна 1: токены обеих тем. Источник истины —
+   .a0proj/_bmad-output/planning-artifacts/design-system-v2-action-first.md
+   (§2 цвет, §4 форма, §5 движение, §17 тёмная тема).
+
+   ВАЖНО (Н-3): здесь обычный `@theme`, НЕ `@theme inline`.
+   `inline` встраивает значение прямо в утилиту (.bg-bg{background-color:#F4F2EE}),
+   и тогда [data-theme="dark"] не сможет переопределить фон — тёмная тема
+   не заработает вообще, без единой ошибки сборки.
+   ============================================================================ */
+
+/* Вариант `dark:` для редких исключений (§17.4 п.4). 95% компонентов его
+   не используют: тема меняет только значения переменных, а не классы. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------- СВЕТЛАЯ ТЕМА: значения по умолчанию ---------- */
+@theme {
+  /* База — один фон на приложение (§2.1) */
+  --color-bg: #F4F2EE;
+  /* Поверхности — два уровня, не больше */
+  --color-surface: #EAE7E0;
+  --color-surface-raised: #F0EDE6;
+  /* Текст — три уровня */
+  --color-ink: #191B1F;
+  --color-ink-secondary: #464B51;
+  --color-ink-muted: #5F656B;
+  /* Акцент = сами чернила: главная кнопка не имеет своего тона (§2.1) */
+  --color-accent: #191B1F;
+  --color-accent-ink: #F4F2EE;
+  --color-accent-hover: #2A2E34;
+  --color-accent-pressed: #0F1114;
+  /* Семантика — только информация, никогда не штатное состояние (§2.3) */
+  --color-success: #2B6349;
+  --color-success-tint: #E6EFE9;
+  --color-warning: #8A5A00;
+  --color-warning-tint: #F7EBD8;
+  --color-danger: #A0281C;
+  --color-danger-tint: #F6E4E0;
+  /* Границы */
+  --color-border: #D8D3C9;
+  --color-border-subtle: #E2DED5;
+  --color-border-input: #787E84;
+  --color-focus-ring: #191B1F;
+  /* Неактивное состояние (§6.4). Значения даны спекой для светлой темы.
+     Тёмная тема НЕ задана в артефакте — берём существующие surface/ink-muted,
+     а не выдуманный hex (см. долг L-DS2-1 в story-файле). */
+  --color-disabled-bg: #DFDBD2;
+  --color-disabled-ink: #9AA0A6;
+
+  /* Единственная тень — только sheet/dialog/popover/toast (§4.3).
+     Карточка в ленте тени не имеет никогда. */
+  --shadow-overlay: 0 8px 24px rgba(25, 27, 31, 0.16);
+
+  /* Гарнитура: Golos Text через next/font/local. Переменная --font-golos
+     объявляется на <html> в layout.tsx; здесь — подключение с фолбэком
+     из §3.1. Если шрифт не загрузился, работает системный стек. */
+  --font-sans: var(--font-golos), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Радиусы: два рабочих + full (§4.2). 12 из v1 снят. */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-full: 999px;
+
+  /* Движение: три длительности и три кривые (§5.1). ease-in не используется:
+     он задерживает отклик на нажатие. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-linear: linear;
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* Слои (§5.4) */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-scrim: 30;
+  --z-sheet: 40;
+  --z-dialog: 50;
+  --z-toast: 60;
+}
+
+/* ---------- ТЁМНАЯ ТЕМА: переопределение тех же имён (§17.2, §17.4) ----------
+   Блок обязан быть ПОЛНЫМ: пропущенный токен наследует светлое значение и
+   даёт светлую плашку на тёмном фоне. Ловится гейтом 3 (scripts/design).
+
+   Специфичность: [data-theme="dark"] и :root равны (0,1,0), поэтому правило
+   светлой color-scheme объявлено ниже как :root:not([data-theme="dark"]) —
+   иначе оно перебило бы тёмную и скроллбар остался бы белым (Б-1). */
+[data-theme="dark"] {
+  --color-bg: #161513;
+  --color-surface: #1F1D1A;
+  --color-surface-raised: #26241F;
+  --color-ink: #F2EFE9;
+  --color-ink-secondary: #BDB8AE;
+  /* Н-5: #9A9489, не #918B80 — минимум 5.15:1 к raised */
+  --color-ink-muted: #9A9489;
+  --color-accent: #F2EFE9;
+  --color-accent-ink: #161513;
+  --color-accent-hover: #FFFFFF;
+  --color-accent-pressed: #DAD5CB;
+  --color-success: #5FA57E;
+  --color-success-tint: #272D26;
+  --color-warning: #D9A144;
+  --color-warning-tint: #352D1F;
+  --color-danger: #E0705E;
+  --color-danger-tint: #302420;
+  --color-border: #33302B;
+  --color-border-subtle: #2A2823;
+  --color-border-input: #7A756B;
+  --color-focus-ring: #F2EFE9;
+  /* L-DS2-1: артефакт не задаёт disabled для тёмной темы. Не выдумываем hex —
+     переиспользуем роли: подложка surface, текст ink-muted (5.15:1 к surface-raised). */
+  --color-disabled-bg: var(--color-surface);
+  --color-disabled-ink: var(--color-ink-muted);
+
+  /* На тёмном тень должна быть чернее фона: 16% не видно вообще (§17.12) */
+  --shadow-overlay: 0 8px 28px rgba(0, 0, 0, 0.56);
+
+  color-scheme: dark;
+}
+
+/* Светлая схема — только если тёмная НЕ выбрана (Б-1). Без :not() правило
+   перебивало бы [data-theme="dark"] и нативные контролы оставались светлыми. */
+:root:not([data-theme="dark"]) {
+  color-scheme: light;
+}
+
+/* ---------- КАРТА ПЕРЕИМЕНОВАНИЯ (§15.4, шаг 0; ревью Б-6) ----------
+   Старые имена сохранены как алиасы на новые токены. Причина: 19 файлов
+   волн 2–5 ещё используют var(--border-input) / var(--accent) /
+   var(--accent-ink) напрямую (например components/cards/card-create-form.tsx).
+   Удалить их сейчас — значит молча потерять цвет: ошибки сборки не будет,
+   рамка поля просто исчезнет.
+
+   Алиасы указывают на var(--color-*), поэтому старые компоненты автоматически
+   получают и новую палитру, и тёмную тему. Удаление старых имён — последний
+   шаг волны 5, когда `grep -n 'var(--background)\|var(--accent)'` даёт 0.
+
+   Побочный эффект, ожидаемый по спеке: --accent меняет значение #7A3E12 →
+   #191B1F. Это смена палитры, а не переименование (§15.4). */
+:root {
+  --background: var(--color-bg);
+  --foreground: var(--color-ink);
+  --accent: var(--color-accent);
+  --accent-ink: var(--color-accent-ink);
+  --border-input: var(--color-border-input);
+}
+
+/* ---------- ГРАНИЦА АВАТАРА В ТЁМНОЙ ТЕМЕ (§17.11) ----------
+   На тёмном фоне светлое фото «плавает» без края, поэтому граница должна быть
+   видимой: `border-input` (3.67:1 к surface) вместо декоративной `border`.
+   Задано правилом, а не классом `dark:` в компоненте — §17.4: компонент один,
+   тема меняет значение. */
+[data-theme="dark"] [data-slot="avatar"] {
+  border-color: var(--color-border-input);
+}
+
+/* ---------- БАЗА ---------- */
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* Числа не «прыгают» при обновлении (§3.3): места, минуты, счётчики, номера. */
+.tabular-nums,
+[data-numeric] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- НАТИВНЫЕ КОНТРОЛЫ (§17.8) ----------
+   Автозаполнение: Chrome игнорирует background-color у :autofill, перекрасить
+   можно только inset-тенью. Без этого на тёмном фоне жёлто-голубая плашка. */
+input:autofill,
+textarea:autofill {
+  -webkit-text-fill-color: var(--color-ink);
+  box-shadow: inset 0 0 0 100px var(--color-surface);
+  caret-color: var(--color-ink);
+}
+
+/* ---------- ПЕРЕХОД МЕЖДУ ТЕМАМИ (§17.10) ----------
+   Анимируется только хром. Карточки в ленте — НЕ анимируются: 20 карточек ×
+   (фон + текст + граница) дают дёрганый кадр на среднем Android.
+   `prefers-reduced-motion` гасит полностью — переход темы тоже движение. */
+@media (prefers-reduced-motion: no-preference) {
+  body,
+  header,
+  nav,
+  [data-theme-transition] {
+    transition: background-color 120ms ease-out,
+      color 120ms ease-out,
+      border-color 120ms ease-out;
+  }
+}

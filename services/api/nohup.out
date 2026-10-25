@@ -1,0 +1,124 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.14, pytest-9.1.1, pluggy-1.7.0
+rootdir: /a0/usr/projects/bmad_dev/karamel/services/api
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 18 items
+
+tests/integration/test_cards_api.py ..................                   [100%]
+
+=============================== warnings summary ===============================
+tests/integration/test_cards_api.py:27
+  /a0/usr/projects/bmad_dev/karamel/services/api/tests/integration/test_cards_api.py:27: StarletteDeprecationWarning: 'HTTP_413_REQUEST_ENTITY_TOO_LARGE' is deprecated. Use 'HTTP_413_CONTENT_TOO_LARGE' instead.
+    from app.main import app
+
+tests/integration/test_cards_api.py: 22 warnings
+  /a0/usr/projects/bmad_dev/karamel/services/api/.venv/lib/python3.13/site-packages/httpx/_client.py:1859: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+tests/integration/test_cards_api.py::test_update_own_draft_changes_fields_and_expires
+tests/integration/test_cards_api.py::test_update_foreign_card_is_not_found
+tests/integration/test_cards_api.py::test_update_missing_card_returns_same_code
+tests/integration/test_cards_api.py::test_update_published_card_conflicts
+tests/integration/test_cards_api.py::test_update_capacity_to_one_requires_window
+tests/integration/test_cards_api.py::test_update_capacity_to_open_set_uses_default_window
+tests/integration/test_cards_api.py::test_update_capacity_to_open_set_uses_default_window
+  /a0/usr/projects/bmad_dev/karamel/services/api/.venv/lib/python3.13/site-packages/httpx/_client.py:1933: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 18 passed, 30 warnings in 2.65s ========================
+bash: line 2: tests/integration/test_cards_feed_api.py: Permission denied
+bash: line 3: tests/integration/test_cards_feed_review.py: Permission denied
+bash: line 4: tests/integration/test_cards_state_api.py: Permission denied
+bash: line 5: tests/integration/test_card_state_races.py: Permission denied
+bash: line 6: tests/integration/test_chat_messages_api.py: Permission denied
+bash: line 7: tests/integration/test_chat_messages_cr.py: Permission denied
+bash: line 8: tests/integration/test_chat_opening.py: Permission denied
+bash: line 9: tests/integration/test_chat_opening_race.py: Permission denied
+bash: line 10: tests/integration/test_chats_list_api.py: Permission denied
+bash: line 11: tests/integration/test_chats_schema.py: Permission denied
+bash: line 12: tests/integration/test_close_due_card_boundaries.py: Permission denied
+bash: line 13: tests/integration/test_close_due_cards_locks.py: Permission denied
+bash: line 14: tests/integration/test_close_due_cards.py: Permission denied
+bash: line 15: tests/integration/test_consent_api.py: Permission denied
+bash: line 16: tests/integration/test_decision_reminders.py: Permission denied
+bash: line 17: tests/integration/test_error_envelope_debts.py: Permission denied
+bash: line 18: tests/integration/test_event_cards_schema.py: Permission denied
+bash: line 19: tests/integration/test_event_card_viewer_participates.py: Permission denied
+bash: line 20: tests/integration/test_feed_expired_full.py: Permission denied
+bash: line 21: tests/integration/test_hidden_place_card.py: Permission denied
+============================= test session starts ==============================
+platform linux -- Python 3.13.14, pytest-9.1.1, pluggy-1.7.0
+rootdir: /a0/usr/projects/bmad_dev/karamel/services/api
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 17 items
+
+tests/integration/test_join_requests_api.py .................            [100%]
+
+=============================== warnings summary ===============================
+tests/integration/test_join_requests_api.py:28
+  /a0/usr/projects/bmad_dev/karamel/services/api/tests/integration/test_join_requests_api.py:28: StarletteDeprecationWarning: 'HTTP_413_REQUEST_ENTITY_TOO_LARGE' is deprecated. Use 'HTTP_413_CONTENT_TOO_LARGE' instead.
+    from app.main import app
+
+tests/integration/test_join_requests_api.py: 25 warnings
+  /a0/usr/projects/bmad_dev/karamel/services/api/.venv/lib/python3.13/site-packages/httpx/_client.py:1859: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 17 passed, 26 warnings in 2.61s ========================
+bash: line 23: tests/integration/test_join_requests_schema.py: Permission denied
+bash: line 24: tests/integration/test_moderation_api.py: Permission denied
+bash: line 25: tests/integration/test_moderation_indexes.py: Permission denied
+bash: line 26: tests/integration/test_my_requests_api.py: Permission denied
+bash: line 27: tests/integration/test_notifications_migration_cycle.py: Permission denied
+bash: line 28: tests/integration/test_oauth_callback.py: Permission denied
+bash: line 29: tests/integration/test_participants_oracle_headers.py: Permission denied
+bash: line 30: tests/integration/test_phone_auth.py: Permission denied
+bash: line 31: tests/integration/test_photo_moderation_db.py: Permission denied
+bash: line 32: tests/integration/test_places_api.py: Permission denied
+bash: line 33: tests/integration/test_places_list_api.py: Permission denied
+bash: line 34: tests/integration/test_places_schema.py: Permission denied
+bash: line 35: tests/integration/test_profile_photos_api.py: Permission denied
+bash: line 36: tests/integration/test_profile_photos_race.py: Permission denied
+bash: line 37: tests/integration/test_profile_photos_schema.py: Permission denied
+bash: line 38: tests/integration/test_profiles_api.py: Permission denied
+bash: line 39: tests/integration/test_profiles_schema.py: Permission denied
+bash: line 40: tests/integration/test_profiles_visibility.py: Permission denied
+bash: line 41: tests/integration/test_profiles_write_api.py: Permission denied
+bash: line 42: tests/integration/test_refresh_tokens.py: Permission denied
+============================= test session starts ==============================
+platform linux -- Python 3.13.14, pytest-9.1.1, pluggy-1.7.0
+rootdir: /a0/usr/projects/bmad_dev/karamel/services/api
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 5 items
+
+tests/integration/test_report_no_show_privacy.py .....                   [100%]
+
+=============================== warnings summary ===============================
+tests/integration/report_helpers.py:32
+  /a0/usr/projects/bmad_dev/karamel/services/api/tests/integration/report_helpers.py:32: StarletteDeprecationWarning: 'HTTP_413_REQUEST_ENTITY_TOO_LARGE' is deprecated. Use 'HTTP_413_CONTENT_TOO_LARGE' instead.
+    from app.main import app
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+========================= 5 passed, 1 warning in 1.81s =========================
+bash: line 44: tests/integration/test_report_no_show.py: Permission denied
+bash: line 45: tests/integration/test_report_notifications_untouched.py: Permission denied
+bash: line 46: tests/integration/test_reports_migration_cycle.py: Permission denied
+bash: line 47: tests/integration/test_request_cancel_api.py: Permission denied
+bash: line 48: tests/integration/test_routes_no_numeric_ids.py: Permission denied
+bash: line 49: tests/integration/test_select_author_api.py: Permission denied
+bash: line 50: tests/integration/test_select_impersonality.py: Permission denied
+bash: line 51: tests/integration/test_select_races.py: Permission denied
+bash: line 52: tests/integration/test_sms_store_redis.py: Permission denied
+bash: line 53: tests/integration/test_system_messages_api.py: Permission denied
+bash: line 54: tests/integration/test_users_id_positive_check.py: Permission denied
+bash: line 55: tests/integration/test_users_repository.py: Permission denied
+bash: line 56: tests/integration/test_ws_connection.py: Permission denied
+bash: line 57: tests/integration/test_ws_harness.py: Permission denied
+bash: line 58: tests/integration/test_ws_publish.py: Permission denied

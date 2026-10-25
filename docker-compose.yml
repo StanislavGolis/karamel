@@ -1,0 +1,166 @@
+# «Карамель» — окружение развёртывания на shared-хосте.
+# Лимиты памяти обязательны: рядом живёт агент, OOM-killer не должен выбирать между ними.
+# Порты БД и Redis привязаны к 127.0.0.1 — наружу только через reverse proxy.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-karamel_db}
+      POSTGRES_USER: ${POSTGRES_USER:-karamel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-karamel_pass}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-karamel} -d ${POSTGRES_DB:-karamel_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-karamel_redis_pass}", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:-karamel_redis_pass} --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+
+  # Применяет миграции до старта api и worker.
+  # Без этого на чистой БД таблиц нет и первое обращение к users падает в 500.
+  # Отдельный сервис, а не entrypoint: видно в `docker compose ps`, не даёт гонку при рестарте,
+  # а api/worker стартуют только после успешного завершения (service_completed_successfully).
+  migrate:
+    build: ./services/api
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://karamel:karamel_pass@postgres:5432/karamel_db}
+      ENV: ${ENV:-development}
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 256m
+    restart: "no"
+
+  api:
+    build: ./services/api
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://karamel:karamel_pass@postgres:5432/karamel_db}
+      REDIS_URL: ${REDIS_URL:-redis://:karamel_redis_pass@redis:6379/0}
+      ENV: ${ENV:-development}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      API_URL: ${API_URL:-http://api:8000}
+      # Стори 1.3: имена пробрасываются без значений — секреты живут только в .env,
+      # иначе `docker compose config` и история git раскрывают client_secret.
+      YANDEX_CLIENT_ID: ${YANDEX_CLIENT_ID:-}
+      YANDEX_CLIENT_SECRET: ${YANDEX_CLIENT_SECRET:-}
+      VK_CLIENT_ID: ${VK_CLIENT_ID:-}
+      VK_CLIENT_SECRET: ${VK_CLIENT_SECRET:-}
+      JWT_SECRET: ${JWT_SECRET:-dev_only_secret}
+      OAUTH_STATE_TTL_SECONDS: ${OAUTH_STATE_TTL_SECONDS:-600}
+      # Стори 1.4: SMS-вход. `SMS_CODE_SECRET` вне dev обязателен и не короче 32
+      # символов (openssl rand -hex 32) — иначе приложение не стартует.
+      SMS_PROVIDER: ${SMS_PROVIDER:-stub}
+      SMSRU_API_ID: ${SMSRU_API_ID:-}
+      SMS_CODE_SECRET: ${SMS_CODE_SECRET:-}
+      # Фикс OOM (2026-10-22): предел размера тела запроса. Тело на ~10 МБ
+      # роняло контейнер по OOM; гард в `app/core/body_limit.py` отбивает его
+      # `413 request_too_large` до чтения в память. Дефолт совпадает с дефолтом
+      # `Settings.max_request_body_bytes` — `.env` можно не менять.
+      MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-1048576}
+      # Стори 2.2 (AC-08): лимит самого файла фото. Маршрут загрузки получает
+      # в гарде `MAX_PHOTO_BYTES + 64 КиБ` на обвязку multipart, остальные —
+      # прежний 1 МиБ. Дефолт совпадает с `Settings.max_photo_bytes`.
+      MAX_PHOTO_BYTES: ${MAX_PHOTO_BYTES:-5242880}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status==200 else sys.exit(1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # Стори 4.6 (AC-05, AR33/AR34): воркер окон и архива карточек.
+  #
+  # Отдельный контейнер, а не второй цикл в `worker` (`likes_reset`): разные
+  # задачи не должны делить процесс — падение одной не останавливает другую,
+  # а в `docker compose ps` видно, что именно живо. Своя транзакция на прогон,
+  # свой пул соединений, свой лимит памяти.
+  worker-cards:
+    build: ./services/api
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://karamel:karamel_pass@postgres:5432/karamel_db}
+      REDIS_URL: ${REDIS_URL:-redis://:karamel_redis_pass@redis:6379/0}
+      ENV: ${ENV:-development}
+    command: ["python", "-m", "app.workers.card_windows"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    mem_limit: 192m
+
+  web:
+    build: ./apps/web
+    restart: unless-stopped
+    environment:
+      API_URL: ${API_URL:-http://api:8000}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 768m
+
+  worker:
+    build: ./services/api
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://karamel:karamel_pass@postgres:5432/karamel_db}
+      REDIS_URL: ${REDIS_URL:-redis://:karamel_redis_pass@redis:6379/0}
+      ENV: ${ENV:-development}
+    command: ["python", "-m", "app.workers.likes_reset"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    mem_limit: 192m
+
+volumes:
+  pgdata:
+  redisdata:

@@ -1,0 +1,225 @@
+{
+  "$schema": "./design-system.manifest.schema.json",
+  "version": "2.3.0",
+  "wave": 2,
+  "tokenSource": "src/app/globals.css",
+  "note": "Волна 2: 9 примитивов переведены в status=system. Каждый переписан с shadcn-словаря (bg-primary/text-muted-foreground/dark:*) на наши --color-* токены по §6.5 п.2 и §17.4 (тема меняет значения переменных, а не классы). Остальные компоненты остаются legacy до волн 3-5 (§15.2).",
+  "components": {
+    "CardActions": {
+      "path": "cards/card-actions.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "CardCreateForm": {
+      "path": "cards/card-create-form.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "CardFeed": {
+      "path": "cards/card-feed.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "CountdownBadge": {
+      "path": "cards/countdown-badge.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "EventCard": {
+      "path": "cards/event-card.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "JoinActions": {
+      "path": "cards/join-actions.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "ParticipantsList": {
+      "path": "cards/participants-list.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "SeatsIndicator": {
+      "path": "cards/seats-indicator.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "ChatList": {
+      "path": "chat/chat-list.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "ChatScreen": {
+      "path": "chat/chat-screen.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "ConnectionIndicator": {
+      "path": "chat/connection-indicator.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "SystemMessage": {
+      "path": "chat/system-message.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "NotificationSettings": {
+      "path": "notifications/notification-settings.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "PhotoPlaceholder": {
+      "path": "profile/photo-placeholder.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "ProfileForm": {
+      "path": "profile/profile-form.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "ProfilePhotos": {
+      "path": "profile/profile-photos.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "ThemeToggle": {
+      "path": "profile/theme-toggle.tsx",
+      "status": "custom",
+      "wave": 1,
+      "passport": 17
+    },
+    "PersonMini": {
+      "path": "requests/person-mini.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "RequestListRow": {
+      "path": "requests/request-list-row.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "RequestList": {
+      "path": "requests/request-list.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "SupportForm": {
+      "path": "support/support-form.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "SupportList": {
+      "path": "support/support-list.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "SupportTicketsBoard": {
+      "path": "support/support-tickets-board.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "ConsentForm": {
+      "path": "ui/consent-form.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "EmptyState": {
+      "path": "ui/empty-state.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "LogoutButton": {
+      "path": "ui/logout-button.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "PhoneLoginForm": {
+      "path": "ui/phone-login-form.tsx",
+      "status": "legacy",
+      "wave": 0,
+      "passport": 0
+    },
+    "Button": {
+      "path": "ui/button.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    },
+    "Input": {
+      "path": "ui/input.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    },
+    "Textarea": {
+      "path": "ui/textarea.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    },
+    "Sheet": {
+      "path": "ui/sheet.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    },
+    "Dialog": {
+      "path": "ui/dialog.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    },
+    "Toast": {
+      "path": "ui/toast.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    },
+    "Skeleton": {
+      "path": "ui/skeleton.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    },
+    "Avatar": {
+      "path": "ui/avatar.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    },
+    "Badge": {
+      "path": "ui/badge.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
+    }
+  }
+}

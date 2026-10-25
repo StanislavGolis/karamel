@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "design-system.manifest.schema.json",
+  "title": "Машинный индекс компонентов дизайн-системы «Карамель»",
+  "description": "Источник правды для гейта 1 (§14.11 design-system-v2-action-first.md). Приложение Г генерируется из этого файла, а не правится руками.",
+  "type": "object",
+  "required": ["version", "components"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Совпадает с version артефакта дизайн-системы (§14.11 п.6)"
+    },
+    "wave": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "description": "Волна миграции, в которой манифест наполнялся"
+    },
+    "tokenSource": {
+      "type": "string",
+      "description": "Путь к globals.css относительно apps/web — единственный источник значений токенов"
+    },
+    "note": { "type": "string" },
+    "components": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[A-Z][A-Za-z0-9]*$": { "$ref": "#/definitions/component" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "component": {
+      "type": "object",
+      "required": ["path", "status", "passport"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Путь относительно src/components"
+        },
+        "status": {
+          "enum": ["system", "custom", "epic9", "legacy"],
+          "description": "system = примитив; custom = action-first; epic9 = компонент эпика 9; legacy = ещё не мигрирован"
+        },
+        "wave": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "Волна, в которой компонент перейдёт в system/custom/epic9. 0 — ещё не назначена"
+        },
+        "passport": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Ссылка на раздел паспорта §6/§7/§12. 0 = паспорта нет, импорт запрещён (для не-legacy)"
+        }
+      }
+    }
+  }
+}
