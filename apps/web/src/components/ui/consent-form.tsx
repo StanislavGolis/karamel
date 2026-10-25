@@ -115,7 +115,7 @@ export function ConsentForm() {
       }}
     >
       <fieldset className="flex flex-col gap-3">
-        <legend className="pb-2 text-base font-medium text-[#1F1B17]">Пол</legend>
+        <legend className="pb-2 text-base font-medium text-ink">Пол</legend>
         <div className="flex flex-col gap-2 sm:flex-row">
           {(
             [
@@ -125,7 +125,7 @@ export function ConsentForm() {
           ).map((option) => (
             <label
               key={option.value}
-              className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-[#8A7A66] px-4 py-2 text-base has-checked:bg-[#F2ECE2]"
+              className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border-input px-4 py-2 text-base has-checked:bg-surface"
             >
               <input
                 type="radio"
@@ -134,27 +134,27 @@ export function ConsentForm() {
                 required
                 checked={gender === option.value}
                 onChange={() => setGender(option.value)}
-                className="h-5 w-5 accent-[#7A3E12] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+                className="h-5 w-5 accent-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               />
               {option.label}
             </label>
           ))}
         </div>
         {/* AC-02: честно про следующий шаг, без обещания сроков и очереди. */}
-        <p className="text-sm text-[#5A5249]">
+        <p className="text-sm text-ink-secondary">
           Сейчас открыта регистрация для женщин. Мужчинам заявка откроется в следующем обновлении.
         </p>
       </fieldset>
 
       <div className="flex flex-col gap-3">
-        <label className="flex items-start gap-3 text-base text-[#1F1B17]">
+        <label className="flex items-start gap-3 text-base text-ink">
           <input
             type="checkbox"
             name="age"
             checked={ageConfirmed}
             onChange={(event) => setAgeConfirmed(event.target.checked)}
             aria-describedby="age-hint"
-            className="mt-1 h-5 w-5 shrink-0 accent-[#7A3E12] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+            className="mt-1 h-5 w-5 shrink-0 accent-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           />
           <span id="age-hint">Мне исполнилось 18 лет</span>
         </label>
@@ -167,7 +167,7 @@ export function ConsentForm() {
          * Поэтому структура: чекбокс в своей метке, ссылки — отдельным абзацем
          * и связаны с чекбоксом через `aria-describedby`.
          */}
-        <div className="flex items-start gap-3 text-base text-[#1F1B17]">
+        <div className="flex items-start gap-3 text-base text-ink">
           <input
             id="consent"
             type="checkbox"
@@ -175,17 +175,17 @@ export function ConsentForm() {
             checked={consent}
             onChange={(event) => setConsent(event.target.checked)}
             aria-describedby="consent-hint consent-docs"
-            className="mt-1 h-5 w-5 shrink-0 accent-[#7A3E12] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+            className="mt-1 h-5 w-5 shrink-0 accent-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           />
           <label htmlFor="consent" id="consent-hint" className="cursor-pointer">
             Отмечая этот пункт, я даю согласие на обработку персональных данных.
           </label>
         </div>
-        <p id="consent-docs" className="pl-8 text-sm text-[#5A5249]">
+        <p id="consent-docs" className="pl-8 text-sm text-ink-secondary">
           Условия — в{" "}
           <a
             href="/privacy"
-            className="text-[#7A3E12] underline underline-offset-4"
+            className="text-accent underline underline-offset-4"
             target="_blank"
             rel="noreferrer"
           >
@@ -194,7 +194,7 @@ export function ConsentForm() {
           и{" "}
           <a
             href="/terms"
-            className="text-[#7A3E12] underline underline-offset-4"
+            className="text-accent underline underline-offset-4"
             target="_blank"
             rel="noreferrer"
           >
@@ -205,7 +205,7 @@ export function ConsentForm() {
       </div>
 
       {error !== null && (
-        <p role="alert" className="rounded-md bg-[#FBE9E6] px-4 py-3 text-sm text-[#A0281C]">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-sm text-danger">
           {error}{" "}
           {/* Решение 2: рабочая ссылка вместо обещания «напишите в поддержку». */}
           <a href={SUPPORT_HREF} className="underline underline-offset-4">
@@ -217,7 +217,7 @@ export function ConsentForm() {
       <button
         type="submit"
         disabled={!canSubmit}
-        className="min-h-11 rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12] disabled:opacity-60"
+        className="min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-60"
       >
         {isPending ? "Сохраняем…" : "Продолжить"}
       </button>

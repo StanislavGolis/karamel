@@ -41,7 +41,7 @@ export default async function ModLayout({ children }: Readonly<{ children: React
   return (
     <div className="mx-auto max-w-[320px] px-2 py-6">
       <header className="flex items-center justify-between gap-4 pb-4">
-        <span className="text-sm text-[#5A5249]">Карамель · модерация</span>
+        <span className="text-sm text-ink-secondary">Карамель · модерация</span>
       </header>
       {children}
     </div>

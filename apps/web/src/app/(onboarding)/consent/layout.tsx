@@ -57,7 +57,7 @@ export default async function ConsentLayout({ children }: Readonly<{ children: R
   return (
     <div className="mx-auto max-w-[640px] px-4 py-6">
       <header className="flex items-center justify-between gap-4 pb-6">
-        <span className="text-sm text-[#5A5249]">Карамель</span>
+        <span className="text-sm text-ink-secondary">Карамель</span>
         {/* Task 8.7 (AC-07): выход доступен до подтверждения. */}
         <LogoutButton />
       </header>

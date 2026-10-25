@@ -47,6 +47,14 @@ jobs:
         run: node ../../scripts/design/gate3-pairs.mjs
       - name: Гейт 4 — контраст обеих тем
         run: node ../../scripts/design/gate4-contrast-both.mjs
+      # Гейт 5 (ночной прогон 2026-10-26, волна 0). Гейты 2–4 считают контраст
+      # ТОКЕНОВ, поэтому были зелёными на экране, где `text-[#1F1B17]` не знает
+      # про [data-theme="dark"] и текст нечитаем. Гейт 5 смотрит исходники и
+      # работает ratchet'ом: baseline `legacy-hex-baseline.json` фиксирует
+      # остаток долга по волнам 3–5, и падает только на РОСТ или новый файл.
+      # После каждой волны baseline переписывается вниз (--write-baseline).
+      - name: Гейт 5 — литеральные цветовые классы в src (ratchet)
+        run: node ../../scripts/design/gate5-class-contrast.mjs
       - run: npm run build
 
   api:

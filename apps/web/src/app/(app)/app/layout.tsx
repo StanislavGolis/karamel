@@ -82,7 +82,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
   return (
     <div className="mx-auto max-w-[640px] px-4 py-6">
       <header className="flex items-center justify-between gap-4 pb-6">
-        <span className="text-sm text-[#5A5249]">Карамель</span>
+        <span className="text-sm text-ink-secondary">Карамель</span>
         <LogoutButton />
       </header>
       {children}

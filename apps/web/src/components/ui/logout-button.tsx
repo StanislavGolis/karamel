@@ -49,12 +49,12 @@ export function LogoutButton() {
         onClick={logout}
         disabled={isPending}
         aria-label="Выйти из аккаунта"
-        className="min-h-11 min-w-11 rounded-md border border-[#8A7A66] px-4 py-2 text-sm font-medium text-[#1F1B17] transition-colors hover:bg-[#F2ECE2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12] disabled:opacity-60"
+        className="min-h-11 min-w-11 rounded-md border border-border-input px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-60"
       >
         {isPending ? "Выходим…" : "Выйти"}
       </button>
       {error !== null && (
-        <p role="alert" className="text-sm text-[#A0281C]">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       )}

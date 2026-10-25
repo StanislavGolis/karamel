@@ -107,7 +107,7 @@ export function PhoneLoginForm() {
         void (step === "phone" ? requestCode() : verifyCode());
       }}
     >
-      <label className="flex flex-col gap-2 text-sm text-[#1F1B17]">
+      <label className="flex flex-col gap-2 text-sm text-ink">
         Телефон
         <input
           type="tel"
@@ -119,12 +119,12 @@ export function PhoneLoginForm() {
           onChange={(event) => setPhone(event.target.value)}
           // После отправки кода номер не редактируется: код выдан именно на него.
           readOnly={step === "code"}
-          className="min-h-11 rounded-md border border-[#8A7A66] px-3 py-2 text-base read-only:opacity-70"
+          className="min-h-11 rounded-md border border-border-input px-3 py-2 text-base read-only:opacity-70"
         />
       </label>
 
       {step === "code" && (
-        <label className="flex flex-col gap-2 text-sm text-[#1F1B17]">
+        <label className="flex flex-col gap-2 text-sm text-ink">
           Код из SMS
           <input
             type="text"
@@ -134,7 +134,7 @@ export function PhoneLoginForm() {
             autoComplete="one-time-code"
             value={code}
             onChange={(event) => setCode(event.target.value)}
-            className="min-h-11 rounded-md border border-[#8A7A66] px-3 py-2 text-base"
+            className="min-h-11 rounded-md border border-border-input px-3 py-2 text-base"
           />
         </label>
       )}
@@ -142,7 +142,7 @@ export function PhoneLoginForm() {
       <button
         type="submit"
         disabled={isPending}
-        className="min-h-11 rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12] disabled:opacity-60"
+        className="min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-60"
       >
         {isPending ? "Отправляем…" : step === "phone" ? "Получить код по SMS" : "Войти"}
       </button>
@@ -155,14 +155,14 @@ export function PhoneLoginForm() {
             setCode("");
             setError(null);
           }}
-          className="text-sm text-[#5A5249] underline underline-offset-4"
+          className="text-sm text-ink-secondary underline underline-offset-4"
         >
           Изменить номер
         </button>
       )}
 
       {error !== null && (
-        <p role="alert" className="rounded-md bg-[#FBE9E6] px-4 py-3 text-sm text-[#A0281C]">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}

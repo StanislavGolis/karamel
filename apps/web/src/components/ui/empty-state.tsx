@@ -33,9 +33,9 @@ type EmptyStateProps = {
  */
 const ACTION_CLASSES: Record<ActionKind, string> = {
   primary:
-    "min-h-11 rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]",
+    "min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
   quiet:
-    "min-h-11 rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] transition-colors hover:bg-[#F2EDE6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]",
+    "min-h-11 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
 };
 
 export function EmptyState({
@@ -46,9 +46,9 @@ export function EmptyState({
   onAction,
 }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-start gap-3 rounded-lg border border-[#E4DCD1] bg-white p-6">
-      <h2 className="text-lg font-semibold tracking-tight text-[#2B241C]">{title}</h2>
-      <p className="text-sm leading-relaxed text-[#5A5249]">{reason}</p>
+    <div className="flex flex-col items-start gap-3 rounded-lg border border-border bg-surface-raised p-6">
+      <h2 className="text-lg font-semibold tracking-tight text-ink">{title}</h2>
+      <p className="text-sm leading-relaxed text-ink-secondary">{reason}</p>
       {action && onAction ? (
         <button type="button" onClick={onAction} className={ACTION_CLASSES[actionKind]}>
           {action}
