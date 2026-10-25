@@ -1,5 +1,6 @@
 "use client";
 
+import { EmptyState } from "@/components/ui/empty-state";
 /**
  * Список своих обращений в поддержку (стори 9.5; AC-02, AC-03; Task 6.3, 6.4).
  *
@@ -56,13 +57,19 @@ const STATUS_ICONS: Record<string, string> = {
 };
 
 /**
- * Цвет плашки. Контраст проверен по палитре A: `#8A5A00` на `#F2ECE2` и
- * `#2F6B4F` на `#F2ECE2` дают ≥4.5:1 для текста 14px.
+ * Цвет плашки — только токены (`warning` / `success` / `ink-secondary`).
+ * Контраст пар `warning`/`surface` и `success`/`surface` проверяется гейтами 2 и 4
+ * (`scripts/design/gate2-contrast-light.mjs`, `gate4-contrast-both.mjs`),
+ * а не комментарием: значения меняются вместе с темой.
+ *
+ * Волна 4 (2026-10-26): раньше здесь были записаны hex из палитры A
+ * (warning `8A5A00`, success `2F6B4F`). Оба мапятся на токены §2.2 в v2:
+ * `success` пересчитан на `2B6349`, `warning` сохранён.
  */
 const STATUS_CLASSES: Record<string, string> = {
-  open: "text-[#8A5A00]",
-  answered: "text-[#2F6B4F]",
-  closed: "text-[#5A5249]",
+  open: "text-warning",
+  answered: "text-success",
+  closed: "text-ink-secondary",
 };
 
 /**
@@ -93,19 +100,18 @@ function formatDate(value: string): string {
 export function SupportTicketList({ items }: { items: SupportTicketView[] }) {
   if (items.length === 0) {
     return (
-      <div className="flex flex-col gap-2 rounded-2xl border border-[#E2D9CB] px-4 py-4">
-        {/* Task 6.4: пустое состояние объясняет, КУДА писать, если форма не
-            подходит (например, аккаунт заблокирован и форма даёт 403). */}
-        <p className="text-base leading-relaxed">Обращений пока нет.</p>
-        <p className="text-sm text-[#5A5249]">
-          Опишите проблему в форме выше. Если войти не получается — напишите на
-          почту, указанную на странице{" "}
-          <a className="underline" href="/privacy#contact">
-            «Конфиденциальность»
-          </a>
-          .
-        </p>
-      </div>
+      /* Task 6.4 + §8.3: пустота объясняет, КУДА писать, если форма не подходит
+         (например, аккаунт заблокирован и форма даёт 403). `EmptyState` — единый
+         компонент пустоты (§7.8), а не самописная плашка. */
+      <EmptyState
+        title="Обращений пока нет"
+        reason="Опишите проблему в форме выше. Если войти не получается — напишите на почту, указанную на странице:"
+        actionKind="quiet"
+      >
+        <a className="underline" href="/privacy#contact">
+          «Конфиденциальность»
+        </a>
+      </EmptyState>
     );
   }
 
@@ -114,18 +120,18 @@ export function SupportTicketList({ items }: { items: SupportTicketView[] }) {
       {items.map((item) => {
         const label = STATUS_LABELS[item.status] ?? item.status;
         const icon = STATUS_ICONS[item.status] ?? "•";
-        const colorClass = STATUS_CLASSES[item.status] ?? "text-[#5A5249]";
+        const colorClass = STATUS_CLASSES[item.status] ?? "text-ink-secondary";
 
         return (
           <li
             key={item.uuid}
-            className="flex flex-col gap-2 rounded-2xl border border-[#E2D9CB] px-4 py-3"
+            className="flex flex-col gap-2 rounded-2xl border border-border px-4 py-3"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className={`text-sm ${colorClass}`}>
                 <span aria-hidden="true">{icon}</span> {label}
               </span>
-              <span className="text-sm text-[#5A5249]">{formatDate(item.created_at)}</span>
+              <span className="text-sm text-ink-secondary">{formatDate(item.created_at)}</span>
             </div>
             <details className="flex flex-col gap-1">
               <summary className="cursor-pointer text-base leading-relaxed">
@@ -134,20 +140,20 @@ export function SupportTicketList({ items }: { items: SupportTicketView[] }) {
               {/* `whitespace-pre-line`: абзацы обращения значимы (D-9.5-12),
                   и склеивание строк сделало бы «шаги воспроизведения»
                   нечитаемыми. */}
-              <p className="whitespace-pre-line text-base leading-relaxed text-[#5A5249]">
+              <p className="whitespace-pre-line text-base leading-relaxed text-ink-secondary">
                 {item.body}
               </p>
             </details>
             {/* AC-03: ответ и дата видны в списке, без перехода на детальный
                 экран (детального экрана в 9.5 нет, D-9.5-2). */}
             {item.status === "answered" && item.answer ? (
-              <div className="flex flex-col gap-1 border-t border-[#E2D9CB] pt-2">
+              <div className="flex flex-col gap-1 border-t border-border pt-2">
                 <span className="text-sm font-semibold">Ответ поддержки</span>
                 <p className="whitespace-pre-line text-base leading-relaxed">
                   {item.answer}
                 </p>
                 {item.answered_at ? (
-                  <span className="text-sm text-[#5A5249]">
+                  <span className="text-sm text-ink-secondary">
                     {formatDate(item.answered_at)}
                   </span>
                 ) : null}

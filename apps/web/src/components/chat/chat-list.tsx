@@ -25,6 +25,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { fetchChats, type ChatListItem } from "@/lib/queries/chats";
 
 type LoadState =
@@ -46,7 +47,9 @@ function errorMessage(code: string): string {
     case "service_unavailable":
       return "Сервис недоступен. Попробуйте через минуту.";
     default:
-      return "Не удалось загрузить чаты. Проверьте связь и попробуйте снова.";
+      // §8.3: причина НЕ повторяет заголовок `EmptyState` — иначе один и тот
+      // же текст звучит дважды, а тест не отличает заголовок от причины.
+      return "Проверьте связь и попробуйте снова.";
   }
 }
 
@@ -73,9 +76,10 @@ function unreadLabel(count: number): string {
   return `${count} непрочитанных`;
 }
 
-/** Скелетон строки — фиксированная высота (UX: CLS исключён). */
+/** Скелетон строки — фиксированная высота (UX: CLS исключён).
+ *  Примитив `Skeleton` (§6.3): `aria-hidden`, `surface`, гасится при reduced-motion. */
 function RowSkeleton() {
-  return <div className="h-[72px] animate-pulse rounded-lg border border-[#E4DCD1] bg-[#F7F3EE]" />;
+  return <Skeleton kind="row" className="h-[72px] rounded-lg border border-border" />;
 }
 
 export function ChatList() {
@@ -182,19 +186,19 @@ export function ChatList() {
 
   if (state.kind === "error") {
     return (
-      <div className="flex flex-col items-start gap-3">
-        <p className="text-sm text-[#5A5249]">{errorMessage(state.code)}</p>
-        <button
-          type="button"
-          onClick={() => {
-            setState({ kind: "loading" });
-            void refresh();
-          }}
-          className="min-h-11 rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] hover:bg-[#F2EDE6]"
-        >
-          Попробовать снова
-        </button>
-      </div>
+      /* §8.3: ошибка списка — `EmptyState` с действием повтора, а не голая
+         строка. Причина берётся из кода ответа: «сессия истекла» и «сервис
+         недоступен» требуют разных действий, и общий текст врал бы. */
+      <EmptyState
+        title="Не удалось загрузить чаты"
+        reason={errorMessage(state.code)}
+        action="Повторить"
+        actionKind="quiet"
+        onAction={() => {
+          setState({ kind: "loading" });
+          void refresh();
+        }}
+      />
     );
   }
 
@@ -219,28 +223,28 @@ export function ChatList() {
           <li key={item.chat_uuid}>
             <Link
               href={`/app/chats/${item.chat_uuid}`}
-              className="flex min-h-[72px] flex-col gap-1 rounded-lg border border-[#E4DCD1] bg-white p-4 transition-colors hover:bg-[#FAF7F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+              className="flex min-h-[72px] flex-col gap-1 rounded-lg border border-border bg-surface-raised p-4 transition-colors hover:bg-surface-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             >
               <span className="flex items-baseline justify-between gap-3">
-                <span className="text-base font-semibold text-[#2B241C]">
+                <span className="text-base font-semibold text-ink">
                   {item.card_title}
                 </span>
                 <time
                   dateTime={item.last_activity_at}
-                  className="shrink-0 text-sm text-[#5A5249]"
+                  className="shrink-0 text-sm text-ink-secondary"
                 >
                   {timeOf(item.last_activity_at)}
                 </time>
               </span>
               {item.last_message ? (
-                <span className="truncate text-sm text-[#5A5249]">
+                <span className="truncate text-sm text-ink-secondary">
                   {item.last_message.body}
                 </span>
               ) : (
-                <span className="text-sm text-[#736A5F]">Сообщений пока нет</span>
+                <span className="text-sm text-ink-muted">Сообщений пока нет</span>
               )}
               {item.unread_count > 0 ? (
-                <span className="text-sm font-medium text-[#7A3E12]">
+                <span className="text-sm font-medium text-accent">
                   {unreadLabel(item.unread_count)}
                 </span>
               ) : null}
@@ -254,13 +258,13 @@ export function ChatList() {
           type="button"
           onClick={() => void loadMore()}
           disabled={loadingMore}
-          className="min-h-11 self-center rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] hover:bg-[#F2EDE6] disabled:opacity-60"
+          className="min-h-11 self-center rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface disabled:opacity-60"
         >
           {loadingMore ? "Загружаем…" : "Ещё"}
         </button>
       ) : null}
 
-      <p className="text-sm text-[#5A5249]">Всего чатов: {state.total}</p>
+      <p className="text-sm text-ink-secondary">Всего чатов: {state.total}</p>
     </div>
   );
 }

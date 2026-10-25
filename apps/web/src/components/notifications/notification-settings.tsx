@@ -24,6 +24,8 @@
 
 import { useState } from "react";
 
+import { EmptyState } from "@/components/ui/empty-state";
+
 /** Один тип в том объёме, который нужен экрану (поля совпадают с схемой API). */
 export type NotificationSettingView = {
   type: string;
@@ -144,6 +146,20 @@ export function NotificationSettings({ initial }: { initial: NotificationSetting
     }
   }
 
+  // §8.3: пустой перечень — нормальное состояние с объяснением, а не пустой
+  // `<ul>`. Страница (`profile/notifications/page.tsx`) сейчас считает пустоту
+  // сбоем сервера осознанно (D-9.3: сервер обязан отдавать 11 типов), поэтому
+  // ветка защитная — для прямого рендера компонента.
+  if (initial.length === 0) {
+    return (
+      <EmptyState
+        title="Пока нет уведомлений"
+        reason="Список типов приходит с сервера. Обновите страницу — если пусто и дальше, это сбой на нашей стороне."
+        actionKind="quiet"
+      />
+    );
+  }
+
   return (
     <ul className="flex flex-col gap-3">
       {initial.map((item, index) => {
@@ -154,7 +170,7 @@ export function NotificationSettings({ initial }: { initial: NotificationSetting
         return (
           <li
             key={item.type}
-            className="flex flex-col gap-1 border-b border-[#E2D9CB] pb-3 last:border-b-0"
+            className="flex flex-col gap-1 border-b border-border pb-3 last:border-b-0"
           >
             <div className="flex items-start justify-between gap-3">
               <label htmlFor={inputId} className="flex flex-col gap-1">
@@ -162,7 +178,7 @@ export function NotificationSettings({ initial }: { initial: NotificationSetting
                 {item.required ? (
                   /* D-9.3-5: пояснение рядом с переключателем — пользователь
                      должен понимать, ПОЧЕМУ он недоступен, а не искать причину. */
-                  <span className="text-sm text-[#5A5249]">
+                  <span className="text-sm text-ink-secondary">
                     Отключить нельзя: это решение по жалобе или ограничение.
                   </span>
                 ) : null}
@@ -175,14 +191,14 @@ export function NotificationSettings({ initial }: { initial: NotificationSetting
                 aria-label={label}
                 disabled={item.required || state.pending}
                 onClick={() => void toggle(index, !state.enabled)}
-                className="relative h-11 w-11 shrink-0 rounded-full border border-[#8A7A66] text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12] disabled:cursor-not-allowed disabled:opacity-50"
+                className="relative h-11 w-11 shrink-0 rounded-full border border-border-input text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {/* Состояние передаётся ТЕКСТОМ, не только цветом (AC-10 UX). */}
                 {state.enabled ? "вкл" : "выкл"}
               </button>
             </div>
             {state.error ? (
-              <p role="alert" className="text-sm text-[#A0281C]">
+              <p role="alert" className="text-sm text-danger">
                 {state.error}
               </p>
             ) : null}

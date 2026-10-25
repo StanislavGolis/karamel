@@ -30,6 +30,7 @@
 import { useState } from "react";
 
 import { SupportForm } from "@/components/support/support-form";
+import { Button } from "@/components/ui/button";
 import { SupportTicketList, type SupportTicketView } from "@/components/support/support-list";
 
 /** Ответ API на страницу списка (`SupportTicketsResponse`). */
@@ -131,24 +132,28 @@ export function SupportTicketsBoard({
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-lg font-semibold tracking-tight">Мои обращения</h2>
           {total > 0 ? (
-            <span className="text-sm text-[#5A5249]">Всего: {total}</span>
+            <span className="text-sm text-ink-secondary">Всего: {total}</span>
           ) : null}
         </div>
         <SupportTicketList items={items} />
         {error ? (
-          <p role="alert" className="text-sm text-[#A0281C]">
+          <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         ) : null}
         {cursor !== null ? (
-          <button
+          /* Примитив `Button`: `secondary` — второе действие экрана, тап-зона 48,
+             `loading` даёт `aria-busy` без смены текста (§6.4). */
+          <Button
             type="button"
+            variant="secondary"
+            className="self-start"
             onClick={() => void loadMore()}
             disabled={pending}
-            className="self-start rounded-2xl border border-[#8A7A66] px-4 py-3 text-base transition-colors hover:border-[#7A3E12] disabled:cursor-not-allowed disabled:opacity-50"
+            loading={pending}
           >
-            {pending ? "Загружаем…" : "Показать ещё"}
-          </button>
+            Показать ещё
+          </Button>
         ) : null}
       </section>
     </div>

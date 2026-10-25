@@ -42,7 +42,7 @@ export function ConnectionIndicator({ state }: ConnectionIndicatorProps) {
       role="status"
       aria-live="polite"
       data-connection-state={state}
-      className="flex h-[3px] w-full items-center overflow-hidden rounded-sm bg-[#F2EDE6]"
+      className="flex h-[3px] w-full items-center overflow-hidden rounded-sm bg-surface"
     >
       {/* Текст визуально скрыт, но доступен скринридеру и тесту: полоса
           высотой 3px не вмещает строку, а `aria-label` на пустом элементе
@@ -51,7 +51,7 @@ export function ConnectionIndicator({ state }: ConnectionIndicatorProps) {
       <span
         aria-hidden="true"
         className={`h-[3px] w-1/3 rounded-sm ${
-          state === "offline" ? "bg-[#8A2B12]" : "bg-[#B8860B]"
+          state === "offline" ? "bg-danger" : "bg-warning"
         }`}
       />
     </div>

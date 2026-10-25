@@ -25,6 +25,8 @@
 import { useState } from "react";
 
 import type { SupportTicketView } from "@/components/support/support-list";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 /** Предел тела обращения — копия серверной константы (`BODY_MAX_LENGTH`). */
 export const BODY_MAX_LENGTH = 2000;
@@ -130,7 +132,7 @@ export function SupportForm({ onCreated }: { onCreated: (ticket: SupportTicketVi
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-2xl border border-[#E2D9CB] px-4 py-4"
+      className="flex flex-col gap-3 rounded-2xl border border-border px-4 py-4"
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
@@ -138,11 +140,14 @@ export function SupportForm({ onCreated }: { onCreated: (ticket: SupportTicketVi
     >
       <label htmlFor="support-body" className="flex flex-col gap-1">
         <span className="text-base leading-relaxed">Что случилось</span>
-        <span className="text-sm text-[#5A5249]">
+        <span className="text-sm text-ink-secondary">
           Опишите шаги: что вы делали и что ожидали увидеть.
         </span>
       </label>
-      <textarea
+      {/* Примитив `Textarea` (§6.3): рамка `border-input`, тап-зона 48, focus-ring.
+          Собственный счётчик примитива выключен — в форме уже есть `support-counter`
+          с тем же числом, и два счётчика разошлись бы при правке предела. */}
+      <Textarea
         id="support-body"
         name="body"
         value={body}
@@ -154,30 +159,30 @@ export function SupportForm({ onCreated }: { onCreated: (ticket: SupportTicketVi
         }}
         rows={6}
         maxLength={BODY_MAX_LENGTH}
+        showCount={false}
         aria-describedby="support-counter"
-        className="min-h-32 rounded-2xl border border-[#E2D9CB] px-4 py-3 text-base leading-relaxed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+        aria-invalid={error ? true : undefined}
+        className="min-h-32 leading-relaxed"
       />
       <div className="flex items-center justify-between gap-3">
         {/* AC-04, Task 6.2: счётчик `0 / 2000` — человек видит предел заранее,
             а не узнаёт о нём по `422`. */}
-        <span id="support-counter" className="text-sm text-[#5A5249]">
+        <span id="support-counter" className="text-sm text-ink-secondary">
           {body.length} / {BODY_MAX_LENGTH}
         </span>
-        <button
-          type="submit"
-          disabled={!canSend}
-          className="rounded-2xl border border-[#8A7A66] px-4 py-3 text-base transition-colors hover:border-[#7A3E12] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {pending ? "Отправляем…" : "Отправить"}
-        </button>
+        {/* Кнопка-примитив: `primary` — единственное главное действие формы.
+            `loading` включает `aria-busy` и НЕ меняет текст (§6.4). */}
+        <Button type="submit" variant="primary" disabled={!canSend} loading={pending}>
+          Отправить
+        </Button>
       </div>
       {error ? (
-        <p role="alert" className="text-sm text-[#A0281C]">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}
       {sent ? (
-        <p role="status" className="text-sm text-[#5A5249]">
+        <p role="status" className="text-sm text-ink-secondary">
           Обращение отправлено. Ответ придёт в уведомления.
         </p>
       ) : null}

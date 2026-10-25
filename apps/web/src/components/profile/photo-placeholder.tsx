@@ -97,15 +97,14 @@ export function PhotoPlaceholder({ state, reason }: Props) {
 
   return (
     <div
-      className={`${PHOTO_TILE_HEIGHT} flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 text-center`}
-      style={{ borderColor: "#8A7A66", backgroundColor: "#F2ECE2", color: "#5A5249" }}
+      className={`${PHOTO_TILE_HEIGHT} flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border-input bg-surface px-4 text-center text-ink-secondary`}
       // `role="status"`: скринридер сообщит о смене состояния без перехода
       // фокуса. Для `no-photo` это не нужно — состояние статичное.
       role={state === "no-photo" ? undefined : "status"}
       aria-live={state === "moderation-check" ? "polite" : undefined}
     >
       <StateIcon state={state} />
-      <p className="text-base font-medium" style={{ color: "#1F1B17" }}>
+      <p className="text-base font-medium text-ink">
         {CAPTIONS[state]}
       </p>
       {showReason ? (
@@ -114,7 +113,7 @@ export function PhotoPlaceholder({ state, reason }: Props) {
         // в одну строку и станет нечитаемым.
         <p className="whitespace-pre-line text-sm leading-relaxed">{reason}</p>
       ) : null}
-      <p className="text-sm leading-relaxed" style={{ color: "#736A5F" }}>
+      <p className="text-sm leading-relaxed text-ink-muted">
         {HINTS[state]}
       </p>
     </div>

@@ -10,16 +10,5 @@
   "app/(onboarding)/consent/page.tsx": 1,
   "app/(public)/login/page.tsx": 8,
   "app/(public)/privacy/page.tsx": 4,
-  "app/(public)/terms/page.tsx": 4,
-  "components/chat/chat-list.tsx": 19,
-  "components/chat/chat-screen.tsx": 19,
-  "components/chat/connection-indicator.tsx": 3,
-  "components/chat/system-message.tsx": 3,
-  "components/notifications/notification-settings.tsx": 5,
-  "components/profile/profile-form.tsx": 22,
-  "components/requests/request-list-row.tsx": 7,
-  "components/requests/request-list.tsx": 3,
-  "components/support/support-form.tsx": 9,
-  "components/support/support-list.tsx": 11,
-  "components/support/support-tickets-board.tsx": 4
+  "app/(public)/terms/page.tsx": 4
 }

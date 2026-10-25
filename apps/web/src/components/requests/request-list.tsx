@@ -139,9 +139,9 @@ export function RequestList({ state, cardStatus }: RequestListProps) {
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold tracking-tight text-[#2B241C]">
+      <h2 className="text-lg font-semibold tracking-tight text-ink">
         {mode === "open_set" ? "Кто идёт" : "Заявились"}
-        <span className="ml-2 text-sm font-normal text-[#5A5249]">{state.data.total}</span>
+        <span className="ml-2 text-sm font-normal text-ink-secondary">{state.data.total}</span>
       </h2>
       <ul className="flex flex-col gap-3">
         {items.map((item) => (
@@ -156,7 +156,7 @@ export function RequestList({ state, cardStatus }: RequestListProps) {
         ))}
       </ul>
       {/* UX §865: порядок объясняется, иначе он читается как «лучшие сверху». */}
-      <p className="text-sm text-[#5A5249]">Порядок — по времени подачи.</p>
+      <p className="text-sm text-ink-secondary">Порядок — по времени подачи.</p>
     </section>
   );
 }

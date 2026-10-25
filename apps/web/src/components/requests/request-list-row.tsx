@@ -105,21 +105,21 @@ export function RequestListRow({
   }
 
   return (
-    <li className="flex flex-col gap-3 rounded-lg border border-[#E4DCD1] bg-white p-4">
+    <li className="flex flex-col gap-3 rounded-lg border border-border bg-surface-raised p-4">
       <PersonMini name={person.name} age={person.age} photoUrl={person.photo_url} />
-      <p className="line-clamp-3 text-sm leading-relaxed text-[#3D3529]">{message}</p>
+      <p className="line-clamp-3 text-sm leading-relaxed text-ink">{message}</p>
       {selectionAvailable ? (
         <button
           type="button"
           onClick={select}
           disabled={pending || !cardPublished}
-          className="min-h-11 self-start rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white hover:bg-[#5E2F0D] disabled:opacity-60"
+          className="min-h-11 self-start rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:bg-accent-hover disabled:opacity-60"
         >
           {pending ? "Выбираем…" : "Выбрать"}
         </button>
       ) : null}
       {error ? (
-        <p role="alert" className="text-sm text-[#8A2B12]">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}

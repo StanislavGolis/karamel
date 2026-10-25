@@ -14,6 +14,8 @@
  * приговором, а не приглашением.
  */
 
+import * as React from "react";
+
 type ActionKind = "primary" | "quiet";
 
 type EmptyStateProps = {
@@ -22,6 +24,15 @@ type EmptyStateProps = {
   action?: string;
   actionKind?: ActionKind;
   onAction?: () => void;
+  /**
+   * Дополнительное содержимое под причиной (ссылка, пояснение).
+   *
+   * Волна 4 (2026-10-26): `support-list.tsx` обязан был сохранить ссылку на
+   * страницу «Конфиденциальность» внутри пустого состояния — без слота для
+   * потомков перевод на `EmptyState` удалил бы рабочий путь. Проп
+   * опциональный: существующие вызовы не меняются.
+   */
+  children?: React.ReactNode;
 };
 
 /**
@@ -44,11 +55,13 @@ export function EmptyState({
   action,
   actionKind = "primary",
   onAction,
+  children,
 }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-start gap-3 rounded-lg border border-border bg-surface-raised p-6">
       <h2 className="text-lg font-semibold tracking-tight text-ink">{title}</h2>
       <p className="text-sm leading-relaxed text-ink-secondary">{reason}</p>
+      {children ? <div className="text-sm leading-relaxed text-ink-secondary">{children}</div> : null}
       {action && onAction ? (
         <button type="button" onClick={onAction} className={ACTION_CLASSES[actionKind]}>
           {action}

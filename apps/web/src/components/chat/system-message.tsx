@@ -35,11 +35,11 @@ export function SystemMessage({ body, createdAt }: SystemMessageProps) {
     <li className="flex flex-col items-center gap-1">
       <p
         role="status"
-        className="max-w-[90%] rounded-md bg-[#F2EDE6] px-3 py-2 text-center text-sm leading-relaxed text-[#5A5045]"
+        className="max-w-[90%] rounded-md bg-surface px-3 py-2 text-center text-sm leading-relaxed text-ink-secondary"
       >
         {body}
       </p>
-      <span className="text-xs text-[#5A5045]">{timeOf(createdAt)}</span>
+      <span className="text-xs text-ink-secondary">{timeOf(createdAt)}</span>
     </li>
   );
 }

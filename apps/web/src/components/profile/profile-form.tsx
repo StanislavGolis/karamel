@@ -308,7 +308,7 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
           type="button"
           onClick={() => void locate()}
           disabled={isLocating || isPending}
-          className="min-h-11 self-start rounded-md border border-[#8A7A66] px-4 py-2 text-sm font-medium text-[#1F1B17] transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12] disabled:opacity-60"
+          className="min-h-11 self-start rounded-md border border-border-input px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-60"
         >
           {isLocating ? "Определяем…" : "Определить город"}
         </button>
@@ -327,7 +327,7 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
       />
 
       <div className="flex flex-col gap-2">
-        <label htmlFor="bio" className="text-base font-medium text-[#1F1B17]">
+        <label htmlFor="bio" className="text-base font-medium text-ink">
           О себе <span aria-hidden="true">*</span>
         </label>
         <textarea
@@ -339,31 +339,34 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
           aria-invalid={invalidField === "bio"}
           aria-describedby="bio-hint"
           onChange={(event) => update("bio", event.target.value)}
-          className="min-h-11 rounded-md border border-[#8A7A66] bg-white px-4 py-2 text-base text-[#1F1B17] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+          className="min-h-11 rounded-md border border-border-input bg-surface-raised px-4 py-2 text-base text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         />
-        <p id="bio-hint" className="text-sm text-[#5A5249]">
+        <p id="bio-hint" className="text-sm text-ink-secondary">
           До {LIMITS.bio} символов. Осталось: {LIMITS.bio - values.bio.length}.
         </p>
       </div>
 
       {error !== null && (
-        <p role="alert" className="rounded-md bg-[#FBE9E6] px-4 py-3 text-sm text-[#A0281C]">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-sm text-danger">
           {error}
         </p>
       )}
 
       {status !== null && (
-        <p role="status" className="rounded-md bg-[#F2ECE2] px-4 py-3 text-sm text-[#1F1B17]">
+        <p role="status" className="rounded-md bg-surface px-4 py-3 text-sm text-ink">
           {status}
         </p>
       )}
 
+      {/* §8.3 «формы»: `aria-busy` при отправке. Текст кнопки НЕ меняется на
+          «Сохраняем…» — §6.4 п.3: смена текста двигает кнопку по ширине. */}
       <button
         type="submit"
         disabled={!canSubmit}
-        className="min-h-11 rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12] disabled:opacity-60"
+        aria-busy={isPending || undefined}
+        className="min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-60"
       >
-        {isPending ? "Сохраняем…" : isEdit ? "Сохранить изменения" : "Сохранить анкету"}
+        {isEdit ? "Сохранить изменения" : "Сохранить анкету"}
       </button>
     </form>
   );
@@ -403,7 +406,7 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <label htmlFor={id} className="text-base font-medium text-[#1F1B17]">
+      <label htmlFor={id} className="text-base font-medium text-ink">
         {label}
         {required && <span aria-hidden="true"> *</span>}
       </label>
@@ -418,9 +421,9 @@ function Field({
         aria-invalid={invalid}
         aria-describedby={`${id}-hint`}
         onChange={(event) => onChange(event.target.value)}
-        className="min-h-11 rounded-md border border-[#8A7A66] bg-white px-4 py-2 text-base text-[#1F1B17] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+        className="min-h-11 rounded-md border border-border-input bg-surface-raised px-4 py-2 text-base text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       />
-      <p id={`${id}-hint`} className="text-sm text-[#5A5249]">
+      <p id={`${id}-hint`} className="text-sm text-ink-secondary">
         {hint}
       </p>
     </div>

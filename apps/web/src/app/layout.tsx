@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+
+import { ToastProvider } from "@/components/ui/toast";
 import localFont from "next/font/local";
 import "./globals.css";
 
@@ -100,7 +102,11 @@ export default function RootLayout({
         <meta name="color-scheme" content="light dark" />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {/* L-DS3-2: провайдер тостов монтируется один раз на приложение —
+            без него `toast()` волны 2 нигде не отображался. */}
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

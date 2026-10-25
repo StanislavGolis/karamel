@@ -284,13 +284,13 @@ export function ProfilePhotos({
     <section className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-medium">Фотографии</h2>
-        <p className="text-sm leading-relaxed" style={{ color: "#5A5249" }}>
+        <p className="text-sm leading-relaxed text-ink-secondary">
           Фото проверяет модератор. До проверки его видите только вы.
         </p>
       </div>
 
       {error ? (
-        <p className="text-sm leading-relaxed" role="alert" style={{ color: "#A0281C" }}>
+        <p className="text-sm leading-relaxed text-danger" role="alert">
           {error}
         </p>
       ) : null}
@@ -332,8 +332,7 @@ export function ProfilePhotos({
                   type="button"
                   onClick={() => void removePhoto(photo.uuid)}
                   disabled={busy !== null}
-                  className="min-h-11 rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-60"
-                  style={{ backgroundColor: "#F2ECE2", color: "#1F1B17" }}
+                  className="min-h-11 rounded-lg bg-surface px-3 py-2 text-sm font-medium text-ink disabled:opacity-60"
                 >
                   Удалить
                 </button>
@@ -346,8 +345,7 @@ export function ProfilePhotos({
                       setReplacing(photo.uuid);
                     }}
                     disabled={busy !== null}
-                    className="min-h-11 rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-60"
-                    style={{ backgroundColor: "#7A3E12", color: "#FFFFFF" }}
+                    className="min-h-11 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-ink disabled:opacity-60"
                   >
                     Заменить
                   </button>
@@ -356,14 +354,13 @@ export function ProfilePhotos({
                       type="button"
                       onClick={() => void removePhoto(photo.uuid)}
                       disabled={busy !== null}
-                      className="min-h-11 rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-60"
-                      style={{ backgroundColor: "#F2ECE2", color: "#1F1B17" }}
+                      className="min-h-11 rounded-lg bg-surface px-3 py-2 text-sm font-medium text-ink disabled:opacity-60"
                     >
                       Удалить
                     </button>
                   ) : null}
                   {photo.status === "approved" && approvedCount <= 1 ? (
-                    <p className="text-sm leading-relaxed" style={{ color: "#736A5F" }}>
+                    <p className="text-sm leading-relaxed text-ink-muted">
                       Сначала загрузите новое фото
                     </p>
                   ) : null}
@@ -395,21 +392,20 @@ export function ProfilePhotos({
             setAdding(true);
           }}
           disabled={busy !== null}
-          className="min-h-11 self-start rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-60"
-          style={{ backgroundColor: "#7A3E12", color: "#FFFFFF" }}
+          className="min-h-11 self-start rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-ink disabled:opacity-60"
         >
           Добавить фото
         </button>
       ) : null}
 
       {!hasProfile ? (
-        <p className="text-sm leading-relaxed" style={{ color: "#736A5F" }}>
+        <p className="text-sm leading-relaxed text-ink-muted">
           Фото можно добавить после заполнения анкеты.
         </p>
       ) : null}
 
       {hasProfile && photos.length >= 3 && !adding ? (
-        <p className="text-sm leading-relaxed" style={{ color: "#736A5F" }}>
+        <p className="text-sm leading-relaxed text-ink-muted">
           Три фото — предел анкеты.
         </p>
       ) : null}
@@ -468,8 +464,7 @@ function PhotoForm({
         <button
           type="submit"
           disabled={!file || !consent || disabled}
-          className="min-h-11 rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-60"
-          style={{ backgroundColor: "#7A3E12", color: "#FFFFFF" }}
+          className="min-h-11 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-ink disabled:opacity-60"
         >
           {submitLabel}
         </button>
@@ -477,8 +472,7 @@ function PhotoForm({
           type="button"
           onClick={onCancel}
           disabled={disabled}
-          className="min-h-11 rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-60"
-          style={{ backgroundColor: "#F2ECE2", color: "#1F1B17" }}
+          className="min-h-11 rounded-lg bg-surface px-3 py-2 text-sm font-medium text-ink disabled:opacity-60"
         >
           Отмена
         </button>

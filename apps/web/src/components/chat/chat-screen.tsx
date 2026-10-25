@@ -24,6 +24,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConnectionIndicator } from "@/components/chat/connection-indicator";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SystemMessage } from "@/components/chat/system-message";
 import { markChatRead } from "@/lib/queries/chats";
 import { createWsClient, type ConnectionState } from "@/lib/ws-client";
@@ -369,8 +371,8 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
         // сказал, что не записал. Текст отличается от «нет доступа».
         setSendError(
           code === "service_unavailable"
-            ? "Сервис недоступен. Сообщение не отправлено — попробуйте ещё раз."
-            : "Не удалось отправить. Попробуйте ещё раз.",
+            ? "Сервис недоступен. Попробуйте ещё раз."
+            : "Попробуйте ещё раз.",
         );
         return;
       }
@@ -387,7 +389,7 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
         previous.some((item) => item.uuid === saved.uuid) ? previous : [...previous, saved],
       );
     } catch {
-      setSendError("Сеть недоступна. Сообщение не отправлено — попробуйте ещё раз.");
+      setSendError("Сеть недоступна. Попробуйте ещё раз.");
     } finally {
       setSending(false);
     }
@@ -395,7 +397,7 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
 
   if (notFound) {
     return (
-      <p className="text-base leading-relaxed text-[#5A5045]">
+      <p className="text-base leading-relaxed text-ink-secondary">
         Переписка недоступна. Возможно, встреча отменена или ссылка неверна.
       </p>
     );
@@ -412,16 +414,14 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
         // Скелетоны тех же габаритов, что и сообщения: layout shift исключён.
         <div className="flex flex-col gap-3" aria-busy="true" aria-live="polite">
           {[0, 1, 2].map((index) => (
-            <div
-              key={index}
-              className="h-10 w-2/3 animate-pulse rounded-md bg-[#F2EDE6]"
-            />
+            <Skeleton key={index} className="h-10 w-2/3" />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <p className="text-base leading-relaxed text-[#5A5045]">
-          Сообщений пока нет. Напишите первым — партнёры увидят ваше сообщение.
-        </p>
+        <EmptyState
+          title="Напишите первым"
+          reason="Сообщений пока нет. Партнёры увидят ваше сообщение, как только оно уйдёт."
+        />
       ) : (
         <ul className="flex flex-col gap-3">
           {items.map((message) => {
@@ -445,13 +445,13 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
                 <div
                   className={`max-w-[80%] whitespace-pre-wrap break-words rounded-md px-3 py-2 text-base leading-relaxed ${
                     own
-                      ? "bg-[#7A3E12] text-white"
-                      : "border border-[#D8CFC4] bg-white text-[#3D3529]"
+                      ? "bg-accent text-accent-ink"
+                      : "border border-border bg-surface-raised text-ink"
                   }`}
                 >
                   {message.body}
                 </div>
-                <span className="text-xs text-[#5A5045]">{timeOf(message.created_at)}</span>
+                <span className="text-xs text-ink-secondary">{timeOf(message.created_at)}</span>
               </li>
             );
           })}
@@ -467,14 +467,14 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
             await loadPage(cursor, true);
             setLoadingMore(false);
           }}
-          className="min-h-11 self-start rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] hover:bg-[#F2EDE6] disabled:opacity-60"
+          className="min-h-11 self-start rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface disabled:opacity-60"
         >
           {loadingMore ? "Загружаем…" : "Показать ещё"}
         </button>
       ) : null}
 
       {error ? (
-        <p role="alert" className="text-sm text-[#8A2B12]">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -486,7 +486,7 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
         }}
         className="flex flex-col gap-2"
       >
-        <label htmlFor="chat-message" className="text-sm font-medium text-[#3D3529]">
+        <label htmlFor="chat-message" className="text-sm font-medium text-ink">
           Сообщение
         </label>
         <textarea
@@ -495,20 +495,33 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
           onChange={(event) => setDraft(event.target.value)}
           maxLength={4000}
           rows={3}
-          className="w-full rounded-md border border-[#D8CFC4] px-3 py-2 text-base leading-relaxed"
+          className="w-full rounded-md border border-border px-3 py-2 text-base leading-relaxed"
           placeholder="Договоритесь о деталях встречи"
         />
         <button
           type="submit"
           disabled={sending || !draft.trim()}
-          className="min-h-11 self-start rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white hover:bg-[#5E2F0D] disabled:opacity-60"
+          className="min-h-11 self-start rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:bg-accent-hover disabled:opacity-60"
         >
           {sending ? "Отправляем…" : "Отправить"}
         </button>
         {sendError ? (
-          <p role="alert" className="text-sm text-[#8A2B12]">
-            {sendError}
-          </p>
+          <div className="flex flex-col items-start gap-2">
+            {/* §8.3: ошибка отправки — текст + действие повтора. Ввод (draft)
+                сохранён, а `client_message_id` переиспользуется (NFR18):
+                повтор не создаст второе сообщение. */}
+            <p role="alert" className="text-sm text-danger">
+              Сообщение не отправлено. {sendError}
+            </p>
+            <button
+              type="button"
+              onClick={() => void send()}
+              disabled={sending || !draft.trim()}
+              className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface disabled:opacity-60"
+            >
+              Повторить
+            </button>
+          </div>
         ) : null}
       </form>
     </section>
