@@ -83,6 +83,20 @@ class Settings(BaseSettings):
     # разрешён только в development/test — вне dev валидатор его запрещает.
     sms_provider: Literal["smsru", "stub"] = "smsru"
     smsru_api_id: str = ""
+    # Dev-заглушка (действует только при `SMS_PROVIDER=stub`): фиксированный код
+    # вместо `secrets`-генерации. Зачем: вход по телефону отлаживается вручную,
+    # настоящих SMS в пилоте нет, и сгенерированный код приходится каждый раз
+    # искать в логе контейнера — на телефоне это лишний шаг и лишняя ошибка.
+    # Пустое по умолчанию = обычная генерация: заглушка включается только явным
+    # значением в `.env` разработчика и никогда сама.
+    # Вне dev запрещено валидатором `_validate_sms_stub_fixed_code`: фиксированный
+    # код в проде — вход в любой аккаунт с этим номером без доступа к SMS, то есть
+    # обход второго фактора целиком.
+    sms_stub_fixed_code: str = ""
+    # Номера через запятую, для которых действует фиксированный код.
+    # Пусто = код действует для ЛЮБОГО номера (для ручного теста удобнее: не нужно
+    # помнить нормализованную запись `+7…`). Заданный список = только эти номера.
+    sms_stub_fixed_phones: str = ""
     # Task 1.3: перец для HMAC-хеша кода. Дефолт — маркер «не настроено»,
     # вне dev он не проходит валидацию секретов.
     # CR 1.5, патч 26: длина ≥32 символов по той же причине, что у `jwt_secret`.
@@ -771,6 +785,58 @@ class Settings(BaseSettings):
         for name, value, low, high in checks:
             if not low <= value <= high:
                 raise ValueError(f"{name}={value} вне диапазона {low}..{high}")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_sms_stub_fixed_code(self) -> "Settings":
+        """Fail-fast на фиксированный код вне заглушки.
+
+        Три независимые причины падать на старте, а не в проде:
+
+        1. Код не той длины. `sms_code_length` — тоже настройка, и код из 5
+           цифр при длине 6 не совпадёт ни с одним введённым: разработчик
+           видел бы «код не подходит» и искал причину в Redis/хеше.
+        2. `sms_stub_fixed_code` при `SMS_PROVIDER=smsru` бессмыслен: боевой
+           сервис его не читает, но значение в `.env` создаёт ложное
+           впечатление включённой заглушки.
+        3. **Главное:** фиксированный код вне dev — это вход в любой аккаунт
+           с этим номером без доступа к SMS. Второй фактор перестаёт быть
+           фактором, а `SMS_STUB_FIXED_PHONES` ограничивает ущерб только
+           до тех пор, пока список не забыли расширить. Поэтому проверка
+           не «предупреждение в лог», а падение старта.
+        4. Список номеров без кода ничего не включает и почти наверняка
+           означает опечатку в `.env` (забыли строку выше) — пусть падает.
+        """
+        fixed_code = (self.sms_stub_fixed_code or "").strip()
+        fixed_phones = (self.sms_stub_fixed_phones or "").strip()
+        if not fixed_code:
+            if fixed_phones:
+                raise ValueError(
+                    "SMS_STUB_FIXED_PHONES задан, а SMS_STUB_FIXED_CODE пуст: "
+                    "список номеров без кода не включает заглушку"
+                )
+            return self
+        expected = self.sms_code_length
+        # `isdigit()` пропускает юникодные цифры (арабо-индийские, полноширинные),
+        # а код сравнивается как ASCII-строка: такой «код» не совпадёт никогда,
+        # зато пройдёт проверку длины. `isascii()` закрывает эту щель.
+        if not (fixed_code.isascii() and fixed_code.isdigit()) or len(fixed_code) != expected:
+            raise ValueError(
+                "SMS_STUB_FIXED_CODE должен состоять ровно из "
+                f"{expected} ASCII-цифр, получено {fixed_code!r}"
+            )
+        if self.sms_provider != "stub":
+            raise ValueError(
+                "SMS_STUB_FIXED_CODE задан при SMS_PROVIDER="
+                f"{self.sms_provider}: фиксированный код действует только в заглушке"
+            )
+        if self.env not in {"development", "test"}:
+            # Прямая формулировка того, что произошло бы: любой вход на этот
+            # номер пускает без SMS.
+            raise ValueError(
+                "SMS_STUB_FIXED_CODE допустим только при ENV=development или test "
+                f"(сейчас ENV={self.env}): иначе вход на номер без второго фактора"
+            )
         return self
 
     @model_validator(mode="after")

@@ -2,10 +2,6 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import localFont from "next/font/local";
 import "./globals.css";
-import { Geist } from "next/font/google";
-import { cn } from "@/lib/utils";
-
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 /**
  * Golos Text — SIL OFL, полная кириллица, создан под русский (§3.1).
@@ -97,7 +93,7 @@ export default function RootLayout({
   return (
     // suppressHydrationWarning (§17.7 п.2): сервер отдал без data-theme, клиент
     // поставил атрибут до гидратации — иначе React предупредит о расхождении.
-    <html lang="ru" className={cn("h-full", "antialiased", golos.variable, "font-sans", geist.variable)} suppressHydrationWarning>
+    <html lang="ru" className={`${golos.variable} h-full antialiased font-sans`} suppressHydrationWarning>
       <head>
         {/* §17.8: браузер узнаёт до загрузки CSS, что тема поддерживается —
             иначе первый кадр рисуется со светлым скроллбаром. */}

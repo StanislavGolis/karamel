@@ -18,7 +18,10 @@ import secrets
 from dataclasses import dataclass
 from enum import Enum
 
+import structlog
+
 from app.core.config import settings
+from app.services.phone import InvalidPhoneError, normalize_phone
 from app.services.sms_store import SmsStorageUnavailableError, get_sms_store
 
 
@@ -91,6 +94,62 @@ def hash_code(phone: str, code: str) -> str:
     return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
 
 
+def _stub_fixed_code(phone: str) -> str | None:
+    """Dev-заглушка: фиксированный код вместо `secrets` для выбранных номеров.
+
+    Возвращает `None`, когда заглушка не настроена — тогда вызывающий идёт
+    обычным путём (`generate_code`). Возвращает код, только если он включён
+    в настройках **и** номер попадает в область действия.
+
+    Почему нормализация, а не сравнение строк как есть: `SMS_STUB_FIXED_PHONES`
+    заполняет человек, и он напишет `89234490800`, `+7 923 449-08-00` или
+    `+79234490800` — всё это один номер. Прямое сравнение строк дало бы
+    «заглушка включена, но не сработала», и причину искали бы в генераторе
+    кода, а не в формате записи. `issue_code` уже получает нормализованный
+    номер из роута, но защита от повторной нормализации дешевле отладки
+    расхождения: `normalize_phone` идемпотентна.
+
+    Что НЕ делает: не влияет на хеширование, TTL, cooldown и счётчик попыток.
+    Код по-прежнему уходит в Redis только как HMAC-хеш (D-2) — фиксируется
+    исключительно источник значения, и путь проверки остаётся тем же.
+    """
+    fixed_code = (settings.sms_stub_fixed_code or "").strip()
+    if not fixed_code:
+        return None
+
+    try:
+        normalized = normalize_phone(phone)
+    except InvalidPhoneError:
+        # Ненормализуемый номер до сюда доходит только при вызове в обход роута.
+        # Заглушка не должна маскировать ошибку формата: пусть работает обычная
+        # генерация, а `hash_code`/хранилище получат тот же номер, что и раньше.
+        return None
+
+    raw_list = (settings.sms_stub_fixed_phones or "").strip()
+    if raw_list:
+        allowed: list[str] = []
+        for entry in raw_list.split(","):
+            candidate = entry.strip()
+            if not candidate:
+                continue  # «+7…, ,+7…» и хвостовая запятая — не ошибка
+            try:
+                allowed.append(normalize_phone(candidate))
+            except InvalidPhoneError:
+                # Запись мусора в списке не должна валить выдачу кода: иначе
+                # опечатка в `.env` ломает вход целиком. Валидатор конфигурации
+                # проверяет только код, а не записи списка — здесь мягко.
+                continue
+        if normalized not in allowed:
+            return None
+
+    # `sms_stub`, а не `oauth`: фильтр `RedactingOAuthLogger` вырезал бы `msg`,
+    # и в логе не осталось бы следа заглушки (та же причина, что в `stub.py`).
+    # Телефон маскирован: полные номера в логах не норма (AC-07).
+    masked = f"{normalized[:2]}***{normalized[-2:]}" if len(normalized) > 4 else "***"
+    structlog.get_logger("sms_stub").warning("SMS_STUB_FIXED_CODE", phone=masked)
+    return fixed_code
+
+
 async def issue_code(phone: str) -> IssuedCode:
     """Task 4.3 (AC-01): генерация → хеш → атомарный cooldown → запись кода.
 
@@ -105,7 +164,11 @@ async def issue_code(phone: str) -> IssuedCode:
     живой код, которого пользователь не получил.
     """
     store = get_sms_store()
-    code = generate_code()
+    # Dev-заглушка: если задан `SMS_STUB_FIXED_CODE` и номер попадает в область
+    # действия — берём фиксированный код вместо `secrets`. Ниже путь не меняется:
+    # хеш, cooldown, TTL, попытки и проверка остаются прежними, потому что
+    # фиксируется только источник значения, а не механика хранения (D-2, D-3).
+    code = _stub_fixed_code(phone) or generate_code()
     ttl = settings.sms_code_ttl_seconds
     # Хеш считается до захвата cooldown: конфигурационная ошибка не должна
     # запирать номер на 60 секунд без единой отправки.
