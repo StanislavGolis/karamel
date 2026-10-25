@@ -35,7 +35,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { PersonMini } from "@/components/requests/person-mini";
+import { PersonMini } from "@/components/ui/person-mini";
 import { selectRequest } from "@/lib/queries/cards";
 
 /** Тексты отказов по машинному коду — безличные (UX §636). */

@@ -134,7 +134,7 @@ export function CountdownBadge({ expiresAt, serverTime, initialNow }: CountdownB
   if (closed) {
     return (
       <div className="flex flex-col gap-1">
-        <p className="text-sm font-medium text-[#5A5249]">Окно закрыто. Компания собрана.</p>
+        <p className="text-sm font-medium text-ink-secondary">Окно закрыто. Компания собрана.</p>
         <span role="status" className="sr-only">
           {announcement}
         </span>
@@ -144,14 +144,14 @@ export function CountdownBadge({ expiresAt, serverTime, initialNow }: CountdownB
 
   return (
     <div className="flex flex-col gap-1">
-      <p aria-hidden="true" className="text-sm text-[#5A5249]">
+      <p aria-hidden="true" className="text-sm text-ink-secondary">
         {formatShortDeadline(expiresAt)} · осталось {formatRemaining(ms)}
       </p>
       <span role="timer" aria-live="off" className="sr-only">
         {formatAccessibleDeadline(expiresAt)}
       </span>
       {underHour ? (
-        <p aria-hidden="true" className="text-sm font-semibold text-[#8A3B0B]">
+        <p aria-hidden="true" className="text-sm font-semibold text-warning">
           меньше часа на решение
         </p>
       ) : null}

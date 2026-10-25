@@ -46,7 +46,7 @@ export function SeatsIndicator({ capacity, filledCount }: SeatsIndicatorProps) {
   if (free <= 0) return null;
 
   return (
-    <span className="text-sm font-medium text-[#3D3529]">
+    <span className="text-sm font-medium text-ink-secondary">
       Свободно {free} {pluralizeSeats(free)}
     </span>
   );

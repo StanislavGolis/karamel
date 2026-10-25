@@ -18,6 +18,8 @@
 
 import Link from "next/link";
 
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { CountdownBadge } from "@/components/cards/countdown-badge";
 import { SeatsIndicator } from "@/components/cards/seats-indicator";
 
@@ -125,13 +127,73 @@ export function actionLabel(card: FeedCard): string | null {
 }
 
 type EventCardProps = {
-  card: FeedCard;
+  /**
+   * Карточка из ленты. Необязательна ради состояния `loading` (§8.3):
+   * скелетон обязан занимать те же 176px, поэтому он рисуется тем же
+   * компонентом, а не отдельной заглушкой в ленте.
+   */
+  card?: FeedCard;
   /** `true` — карточка автора («Ваша карточка» + «Открыть»). */
   isOwn?: boolean;
+  /** §8.3: `loading` — скелетон 176px в габаритах готовой карточки. */
+  loading?: boolean;
+  /**
+   * §8.3: `offline` — полоса `warning` сверху.
+   *
+   * Чтение не блокируется (§8.4 п.5): показан последний известный кэш,
+   * ограничивается только запись — это делает `JoinRequestSheet`.
+   */
+  offline?: boolean;
+  /** §8.3: `stale` — «Обновляем…», кнопка остаётся активной. */
+  stale?: boolean;
 };
 
-export function EventCard({ card, isOwn = false }: EventCardProps) {
+/**
+ * Тон статуса по §2.3.
+ *
+ * **Жёсткое правило §2.3: `danger` не применяется ни к одному штатному
+ * состоянию карточки.** Красный — сбой системы. Поэтому отменённая встреча —
+ * `muted`, а не `danger`: встреча отменена автором, это факт домена, а не сбой.
+ *
+ * `null` — статус не показывается (карточка в наборе, статус не нужен).
+ */
+export function statusTone(
+  status: FeedCard["status"],
+): "success" | "neutral" | "muted" | null {
+  switch (status) {
+    case "published":
+      return "success";
+    case "full":
+      return "neutral";
+    case "cancelled":
+      return "muted";
+    case "closed":
+    case "finished":
+    case "draft":
+      return "neutral";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Скелетон карточки (§8.3, §8.4 п.1).
+ *
+ * 176px — те же габариты, что у готовой карточки: иначе при появлении данных
+ * лента дёргается и NFR8 (CLS) проваливается. `Skeleton kind="card"` уже
+ * задаёт `h-44` (=176px), поэтому высота не дублируется числом.
+ */
+export function EventCardSkeleton() {
+  return <Skeleton kind="card" className="rounded-lg border border-border" />;
+}
+
+export function EventCard({ card, isOwn = false, loading = false, offline = false, stale = false }: EventCardProps) {
+  // §8.3: `loading` — скелетон. Пустая карточка без флага — тоже скелетон:
+  // рисовать «полукарточку» из `undefined` хуже, чем показать заглушку.
+  if (loading || !card) return <EventCardSkeleton />;
+
   const status = statusLabel(card);
+  const tone = statusTone(card.status);
   const action = actionLabel(card);
   const free = card.capacity - card.filled_count;
 
@@ -150,66 +212,91 @@ export function EventCard({ card, isOwn = false }: EventCardProps) {
     .join(", ");
 
   return (
-    <article className="rounded-lg border border-[#E4DCD1] bg-white">
+    <article className="overflow-hidden rounded-lg border border-border bg-surface">
+      {/* §8.3: `offline` — полоса `warning` сверху. Чтение не блокируется
+          (§8.4 п.5): человек видит последний известный кэш и понимает, что он
+          мог устареть. Запись блокирует `JoinRequestSheet`. */}
+      {offline ? (
+        <p className="bg-warning-tint px-4 py-2 text-sm font-medium text-warning">
+          Нет связи. Показаны последние известные данные.
+        </p>
+      ) : null}
+
       <Link
         href={`/app/cards/${card.uuid}`}
         aria-label={label}
-        className="flex min-h-11 flex-col gap-2 p-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+        className="flex min-h-11 flex-col gap-2 p-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
         <header className="flex items-start justify-between gap-3">
-          <p className="text-lg font-semibold tracking-tight text-[#2B241C]">
+          <p className="text-lg font-semibold tracking-tight text-ink">
             {formatStartsAt(card.starts_at)}
           </p>
-              <span className="shrink-0 text-sm font-medium text-[#3D3529]">
-            {free > 0 ? <SeatsIndicator capacity={card.capacity} filledCount={card.filled_count} /> : "Компания собрана"}
+          <span className="shrink-0 text-sm font-medium text-ink-secondary">
+            {free > 0 ? (
+              <SeatsIndicator capacity={card.capacity} filledCount={card.filled_count} />
+            ) : (
+              "Компания собрана"
+            )}
           </span>
         </header>
 
-        <p className="text-base text-[#5A5249]">
+        <p className="text-base text-ink-secondary">
           {/* X-36: место скрыто — показываем явную пометку, а не пустоту.
               Молчаливое «· cafe» без названия читалось бы как дефект вёрстки. */}
           {card.place ? `${card.place.name} · ${card.category}` : "Место скрыто"}
         </p>
 
-          {status ? (
-          <p className="text-sm font-medium text-[#5A5249]">{status}</p>
-        ) : null}
+        {/* §2.3: статус — `Badge` с тоном по смыслу. Текст обязателен:
+            цвет не носитель смысла (NFR57). */}
+        {status && tone ? <Badge variant={tone}>{status}</Badge> : null}
 
-        <p className="text-base font-medium text-[#2B241C]">{card.title}</p>
+        <p className="text-base font-medium text-ink">{card.title}</p>
 
-          {card.status === "published" && free > 0 ? (
+        {card.status === "published" && free > 0 ? (
           <CountdownBadge expiresAt={card.expires_at} serverTime={card.server_time} />
         ) : null}
 
-          {card.description ? (
-          <p className="line-clamp-3 text-sm leading-relaxed text-[#5A5249]">
+        {card.description ? (
+          <p className="line-clamp-3 text-sm leading-relaxed text-ink-secondary">
             {card.description}
           </p>
         ) : null}
 
         <footer className="flex items-center gap-2 pt-1">
-              <span
+          <span
             aria-hidden="true"
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F2EDE6] text-sm font-medium text-[#3D3529]"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-raised text-sm font-medium text-ink-secondary"
           >
             {(card.author.name ?? "?").slice(0, 1).toUpperCase()}
           </span>
-          <span className="text-sm text-[#5A5249]">
+          <span className="text-sm text-ink-secondary">
             {card.author.name ?? "Участник"}
             {card.author.age ? `, ${card.author.age}` : ""}
           </span>
         </footer>
       </Link>
 
+      {/* §8.3: `stale` — «Обновляем…», кнопка активна. Скрывать действие на
+          время тихой перезагрузки значило бы отбирать возможность, которая
+          ещё работает. */}
+      {stale ? (
+        <p role="status" className="px-4 pb-2 text-sm text-ink-muted">
+          Обновляем…
+        </p>
+      ) : null}
+
       {isOwn ? (
-        <div className="border-t border-[#F2EDE6] px-4 py-3">
-          <span className="text-sm font-medium text-[#3D3529]">Ваша карточка</span>
+        <div className="border-t border-border-subtle px-4 py-3">
+          <span className="text-sm font-medium text-ink-secondary">Ваша карточка</span>
         </div>
       ) : action ? (
-        <div className="border-t border-[#F2EDE6] px-4 py-3">
-              <Link
+        <div className="border-t border-border-subtle px-4 py-3">
+          {/* Действие — `Button`, но как ссылка: переход на карточку, а не
+              запрос. `asChild`-поведения у `Button` нет, поэтому ссылка
+              стилизуется классами варианта, а не оборачивается в кнопку. */}
+          <Link
             href={`/app/cards/${card.uuid}`}
-            className="inline-flex min-h-11 items-center rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+            className="inline-flex min-h-11 items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink transition-colors duration-fast ease-out hover:bg-accent-hover active:bg-accent-pressed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           >
             {action}
           </Link>

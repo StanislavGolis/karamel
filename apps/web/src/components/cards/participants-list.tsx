@@ -19,7 +19,7 @@
  * случайно отрисовать.
  */
 
-import { PersonMini } from "@/components/requests/person-mini";
+import { PersonMini } from "@/components/ui/person-mini";
 import { EmptyState } from "@/components/ui/empty-state";
 
 /** Один участник в ответе `GET /api/v1/cards/{uuid}/participants`. */
@@ -104,7 +104,7 @@ export function ParticipantsList({ state }: ParticipantsListProps) {
           2–6 человек — продуктовый факт (FR85), а не догадка клиента. */}
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold tracking-tight">Компания собрана</h2>
-        <span className="text-sm text-[#5A5045]">{total} человек</span>
+        <span className="text-sm text-ink-secondary">{total} человек</span>
       </div>
       <ul className="flex flex-col gap-3">
         {items.map((member) => (
@@ -115,7 +115,7 @@ export function ParticipantsList({ state }: ParticipantsListProps) {
               photoUrl={member.photo_url}
             />
             {member.is_author ? (
-              <span className="shrink-0 rounded-md border border-[#D8CFC4] px-2 py-1 text-xs font-medium text-[#5A5045]">
+              <span className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium text-ink-secondary">
                 Автор
               </span>
             ) : null}

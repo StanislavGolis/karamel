@@ -67,7 +67,7 @@ function CardSkeleton() {
   return (
     <div
       aria-hidden="true"
-      className="h-[180px] animate-pulse rounded-lg border border-[#E4DCD1] bg-[#F7F3EE]"
+      className="h-[180px] animate-pulse rounded-lg border border-border bg-surface-raised"
     />
   );
 }
@@ -156,8 +156,8 @@ export function CardFeed() {
           aria-pressed={category === null}
           className={`min-h-11 rounded-full border px-3 text-sm ${
             category === null
-              ? "border-[#7A3E12] bg-[#F2EDE6] font-medium text-[#7A3E12]"
-              : "border-[#D8CFC4] text-[#3D3529]"
+              ? "border-accent bg-surface font-medium text-accent"
+              : "border-border text-ink-secondary"
           }`}
         >
           Все
@@ -170,14 +170,14 @@ export function CardFeed() {
             aria-pressed={category === item.value}
             className={`min-h-11 rounded-full border px-3 text-sm ${
               category === item.value
-                ? "border-[#7A3E12] bg-[#F2EDE6] font-medium text-[#7A3E12]"
-                : "border-[#D8CFC4] text-[#3D3529]"
+                ? "border-accent bg-surface font-medium text-accent"
+                : "border-border text-ink-secondary"
             }`}
           >
             {item.label}
           </button>
         ))}
-        <label className="ml-2 flex min-h-11 items-center gap-2 text-sm text-[#3D3529]">
+        <label className="ml-2 flex min-h-11 items-center gap-2 text-sm text-ink-secondary">
           <input
             type="checkbox"
             checked={hasSeats}
@@ -198,14 +198,14 @@ export function CardFeed() {
 
       {state.kind === "error" ? (
         <div className="flex flex-col items-start gap-3">
-          <p className="text-sm text-[#5A5249]">{errorMessage(state.code)}</p>
+          <p className="text-sm text-ink-secondary">{errorMessage(state.code)}</p>
           <button
             type="button"
             onClick={() => {
               setState({ kind: "loading" });
               void refresh();
             }}
-            className="min-h-11 rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] hover:bg-[#F2EDE6]"
+            className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:bg-surface"
           >
             Попробовать снова
           </button>
@@ -251,7 +251,7 @@ export function CardFeed() {
               type="button"
               onClick={() => void loadMore()}
               disabled={loadingMore}
-              className="min-h-11 self-center rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] hover:bg-[#F2EDE6] disabled:opacity-60"
+              className="min-h-11 self-center rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:bg-surface disabled:opacity-60"
             >
               {loadingMore ? "Загружаем…" : "Ещё"}
             </button>

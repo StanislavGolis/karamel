@@ -21,6 +21,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { cancelCard, closeCard } from "@/lib/queries/cards";
 
 /** Текст отказа по машинному коду (§4: клиент ветвится по `code`). */
@@ -76,63 +77,64 @@ export function CardActions({ uuid, status }: CardActionsProps) {
   }
 
   return (
-    <section aria-labelledby="card-actions-title" className="flex flex-col gap-3 rounded-lg border border-[#E4DCD1] bg-white p-4">
-      <h2 id="card-actions-title" className="text-base font-semibold text-[#2B241C]">
+    <section aria-labelledby="card-actions-title" className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
+      <h2 id="card-actions-title" className="text-base font-semibold text-ink">
         Управление встречей
       </h2>
 
       {error ? (
         // `role="alert"` — отказ по конкретному коду должен быть объявлен сразу.
-        <p role="alert" className="rounded-md bg-[#FBEFE3] px-3 py-2 text-sm text-[#7A3E12]">
+        // §2.3: `danger` здесь законен — это сбой действия, а не штатный статус.
+        <p role="alert" className="rounded-md bg-danger-tint px-3 py-2 text-sm text-danger">
           {error}
         </p>
       ) : null}
 
       {closeAvailable ? (
-        <button
+        <Button
           type="button"
-          onClick={() => void run("close")}
+          variant="secondary"
+          loading={pending === "close"}
           disabled={pending !== null}
-          className="min-h-11 rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] hover:bg-[#F2EDE6] disabled:opacity-60"
+          onClick={() => void run("close")}
         >
-          {pending === "close" ? "Закрываем…" : "Закрыть набор"}
-        </button>
+          Закрыть набор
+        </Button>
       ) : null}
 
       {cancelAvailable ? (
         confirming ? (
-          <div className="flex flex-col gap-2 rounded-md bg-[#F2EDE6] p-3">
+          <div className="flex flex-col gap-2 rounded-md bg-surface-raised p-3">
             {/* UX §618: вопрос и два действия; «Отмена» — тихая, не акцент. */}
-            <p className="text-sm text-[#3D3529]">
+            <p className="text-sm text-ink-secondary">
               Отменить встречу? Участники увидят отмену, вернуть карточку нельзя.
             </p>
             <div className="flex flex-wrap gap-2">
-              <button
+              {/* §2.4: отмена встречи необратима, но это не «опасное действие
+                  модератора». `primary` — акцент на решении, красный не нужен. */}
+              <Button
                 type="button"
+                variant="primary"
+                loading={pending === "cancel"}
+                disabled={pending !== null}
                 onClick={() => void run("cancel")}
-                disabled={pending !== null}
-                className="min-h-11 rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
               >
-                {pending === "cancel" ? "Отменяем…" : "Отменить встречу"}
-              </button>
-              <button
+                Отменить встречу
+              </Button>
+              <Button
                 type="button"
-                onClick={() => setConfirming(false)}
+                variant="secondary"
                 disabled={pending !== null}
-                className="min-h-11 rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] hover:bg-white disabled:opacity-60"
+                onClick={() => setConfirming(false)}
               >
                 Оставить
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => setConfirming(true)}
-            className="min-h-11 rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#7A3E12] hover:bg-[#FBEFE3]"
-          >
+          <Button type="button" variant="secondary" onClick={() => setConfirming(true)}>
             Отменить встречу
-          </button>
+          </Button>
         )
       ) : null}
     </section>

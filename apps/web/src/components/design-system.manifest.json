@@ -7,51 +7,51 @@
   "components": {
     "CardActions": {
       "path": "cards/card-actions.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "status": "system",
+      "wave": 3,
+      "passport": 6
     },
     "CardCreateForm": {
       "path": "cards/card-create-form.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "status": "system",
+      "wave": 3,
+      "passport": 6
     },
     "CardFeed": {
       "path": "cards/card-feed.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "status": "system",
+      "wave": 3,
+      "passport": 6
     },
     "CountdownBadge": {
       "path": "cards/countdown-badge.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "status": "system",
+      "wave": 3,
+      "passport": 6
     },
     "EventCard": {
       "path": "cards/event-card.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "status": "system",
+      "wave": 3,
+      "passport": 6
     },
     "JoinActions": {
       "path": "cards/join-actions.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "status": "system",
+      "wave": 3,
+      "passport": 6
     },
     "ParticipantsList": {
       "path": "cards/participants-list.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "status": "system",
+      "wave": 3,
+      "passport": 6
     },
     "SeatsIndicator": {
       "path": "cards/seats-indicator.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "status": "system",
+      "wave": 3,
+      "passport": 6
     },
     "ChatList": {
       "path": "chat/chat-list.tsx",
@@ -108,10 +108,10 @@
       "passport": 17
     },
     "PersonMini": {
-      "path": "requests/person-mini.tsx",
-      "status": "legacy",
-      "wave": 0,
-      "passport": 0
+      "path": "ui/person-mini.tsx",
+      "status": "system",
+      "wave": 2,
+      "passport": 6
     },
     "RequestListRow": {
       "path": "requests/request-list-row.tsx",
