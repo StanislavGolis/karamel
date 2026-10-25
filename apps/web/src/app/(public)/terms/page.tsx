@@ -24,7 +24,7 @@ export default function TermsPage() {
 
         <p
           role="note"
-          className="rounded-md border border-[#8A7A66] bg-[#F2ECE2] px-4 py-3 text-sm text-[#5A5249]"
+          className="rounded-md border border-border-input bg-surface px-4 py-3 text-sm text-ink-secondary"
         >
           Черновик. Документ требует юридической вычитки: итоговые условия утверждает
           владелец сервиса.
@@ -72,7 +72,7 @@ export default function TermsPage() {
           </p>
         </section>
 
-        <Link href="/" className="text-sm text-[#5A5249] underline underline-offset-4">
+        <Link href="/" className="text-sm text-ink-secondary underline underline-offset-4">
           На главную
         </Link>
       </article>

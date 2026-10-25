@@ -189,7 +189,7 @@ export default async function ProfilePage() {
         <h1 className="text-2xl font-semibold tracking-tight">
           {isEdit ? "Ваша анкета" : "Заполните анкету"}
         </h1>
-        <p className="text-base leading-relaxed text-[#5A5249]">
+        <p className="text-base leading-relaxed text-ink-secondary">
           {isEdit
             ? "Изменения видно сразу — их не проверяет модератор."
             : "Это ваша карточка в подборе. Заполнить можно за пару минут."}
@@ -205,10 +205,10 @@ export default async function ProfilePage() {
       <Link
         href="/app/profile/notifications"
         prefetch={false}
-        className="flex items-center justify-between gap-3 rounded-2xl border border-[#E2D9CB] px-4 py-3 text-base leading-relaxed transition-colors hover:border-[#8A7A66]"
+        className="flex items-center justify-between gap-3 rounded-2xl border border-border px-4 py-3 text-base leading-relaxed transition-colors hover:border-border-input"
       >
         <span>Уведомления</span>
-        <span className="text-[#5A5249]" aria-hidden="true">
+        <span className="text-ink-secondary" aria-hidden="true">
           Выбрать, о чём присылать
         </span>
       </Link>
@@ -220,10 +220,10 @@ export default async function ProfilePage() {
       <Link
         href="/app/profile/support"
         prefetch={false}
-        className="flex items-center justify-between gap-3 rounded-2xl border border-[#E2D9CB] px-4 py-3 text-base leading-relaxed transition-colors hover:border-[#8A7A66]"
+        className="flex items-center justify-between gap-3 rounded-2xl border border-border px-4 py-3 text-base leading-relaxed transition-colors hover:border-border-input"
       >
         <span>Поддержка</span>
-        <span className="text-[#5A5249]" aria-hidden="true">
+        <span className="text-ink-secondary" aria-hidden="true">
           Написать обращение
         </span>
       </Link>

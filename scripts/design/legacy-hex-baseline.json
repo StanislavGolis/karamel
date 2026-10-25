@@ -1,14 +1,1 @@
-{
-  "app/(app)/app/cards/[uuid]/page.tsx": 7,
-  "app/(app)/app/cards/new/page.tsx": 1,
-  "app/(app)/app/chats/[uuid]/page.tsx": 1,
-  "app/(app)/app/chats/page.tsx": 2,
-  "app/(app)/app/page.tsx": 11,
-  "app/(app)/app/profile/notifications/page.tsx": 1,
-  "app/(app)/app/profile/page.tsx": 7,
-  "app/(app)/app/profile/support/page.tsx": 1,
-  "app/(onboarding)/consent/page.tsx": 1,
-  "app/(public)/login/page.tsx": 8,
-  "app/(public)/privacy/page.tsx": 4,
-  "app/(public)/terms/page.tsx": 4
-}
+{}

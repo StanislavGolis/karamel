@@ -54,7 +54,7 @@ export default async function ChatPage({ params }: { params: Promise<{ uuid: str
 
   return (
     <main className="flex flex-col gap-4">
-      <a href="/app" className="min-h-11 self-start text-sm font-medium text-[#7A3E12]">
+      <a href="/app" className="min-h-11 self-start text-sm font-medium text-accent">
         ← К ленте
       </a>
       {/* `uuid` зрителя — для выравнивания своих сообщений. Внутренний `id`

@@ -100,7 +100,7 @@ export default async function NewCardPage() {
     <main className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Новая карточка</h1>
-        <p className="text-base leading-relaxed text-[#5A5249]">
+        <p className="text-base leading-relaxed text-ink-secondary">
           Пять полей — что, когда, где, сколько человек и описание. Компания соберётся сама.
         </p>
       </div>

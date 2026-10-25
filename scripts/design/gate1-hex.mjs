@@ -195,13 +195,22 @@ function main() {
 
     if (violations.length === 0) continue;
 
-    // Статус берётся из манифеста. Файлы в `src/app/**` в манифест не входят:
-    // страницы мигрируются волной 5, до неё они считаются legacy.
+    // Статус берётся из манифеста. Файлы в `src/app/**` в манифест не входят.
+    // До волны 5 они считались `legacy` и нарушения в них молча пропускались:
+    // гейт печатал «55 файлов проверено, нарушений нет», даже когда в странице
+    // стоял `bg-[#123456]` (проверено мутацией 2026-10-26). Волна 5 — конец
+    // миграции, поэтому страницы и layout'ы проверяются наравне с компонентами.
+    // Исключение для `legacy`-компонентов сохранено: манифест ещё содержит
+    // такие записи, и их владельцы — не волна 5.
     const entry = byPath.get(resolve(file));
     const status = entry?.status ?? "legacy";
     const isTest = /__tests__|\.test\.tsx?$/.test(file);
+    const isAppFile = rel.split("\\").join("/").startsWith("src/app/");
 
-    if (status === "legacy" || isTest) {
+    if (isTest) {
+      continue;
+    }
+    if (status === "legacy" && !isAppFile) {
       continue;
     }
 

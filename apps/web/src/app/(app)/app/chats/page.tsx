@@ -54,12 +54,12 @@ export default async function ChatsPage() {
 
   return (
     <main className="flex flex-col gap-4">
-      <a href="/app" className="min-h-11 self-start text-sm font-medium text-[#7A3E12]">
+      <a href="/app" className="min-h-11 self-start text-sm font-medium text-accent">
         ← К встречам
       </a>
       <header className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Чаты</h1>
-        <p className="text-sm text-[#5A5249]">
+        <p className="text-sm text-ink-secondary">
           Здесь переписка собранных компаний. Непрочитанные отмечены числом.
         </p>
       </header>

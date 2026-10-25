@@ -156,7 +156,7 @@ export default async function SupportPage() {
     <main className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Поддержка</h1>
-        <p className="text-base leading-relaxed text-[#5A5249]">
+        <p className="text-base leading-relaxed text-ink-secondary">
           Опишите проблему — ответ придёт в уведомления. Если войти не
           получается, напишите на почту со страницы «Конфиденциальность».
         </p>

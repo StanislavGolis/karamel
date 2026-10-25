@@ -137,7 +137,7 @@ export default async function NotificationSettingsPage() {
     <main className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Уведомления</h1>
-        <p className="text-base leading-relaxed text-[#5A5249]">
+        <p className="text-base leading-relaxed text-ink-secondary">
           Выберите, о чём присылать. Решения по жалобам и санкции приходят
           всегда — их нельзя отключить.
         </p>

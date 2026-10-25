@@ -66,7 +66,7 @@ export default async function AppHomePage() {
           Сейчас в «Карамели» регистрируются женщины. Заявка на участие для мужчин
           откроется в следующем обновлении — мы напишем, когда это произойдёт.
         </p>
-        <p className="text-sm text-[#5A5249]">
+        <p className="text-sm text-ink-secondary">
           Ничего заполнять не нужно: аккаунт уже создан и ждёт открытия заявок.
         </p>
       </main>
@@ -84,27 +84,27 @@ export default async function AppHomePage() {
     <main className="flex flex-col gap-6">
       <header className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Встречи рядом</h1>
-        <p className="text-sm text-[#5A5249]">
+        <p className="text-sm text-ink-secondary">
           Выберите, куда хотите присоединиться, или создайте свою встречу.
         </p>
       </header>
 
       <CardFeed />
 
-      <footer className="flex flex-wrap gap-3 border-t border-[#F2EDE6] pt-4">
+      <footer className="flex flex-wrap gap-3 border-t border-border-subtle pt-4">
         <Link
           href="/app/cards/new"
-          className="min-h-11 rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+          className="min-h-11 rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           Создать карточку
         </Link>
         <Link
           href="/app/profile"
-          className="min-h-11 rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] transition-colors hover:bg-[#F2EDE6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]"
+          className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           Моя анкета
         </Link>
-        <p className="w-full text-sm text-[#5A5249]">
+        <p className="w-full text-sm text-ink-secondary">
           Фотографии в анкете проходят проверку модератора — это касается фото, а не аккаунта.
         </p>
       </footer>

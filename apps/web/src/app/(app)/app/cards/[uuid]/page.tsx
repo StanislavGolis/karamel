@@ -96,7 +96,7 @@ export default async function CardPage({ params }: { params: Promise<{ uuid: str
         </p>
         <a
           href="/app"
-          className="min-h-11 self-start rounded-md border border-[#D8CFC4] px-4 py-2 text-sm font-medium text-[#3D3529] hover:bg-[#F2EDE6]"
+          className="min-h-11 self-start rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface"
         >
           К ленте
         </a>
@@ -131,7 +131,7 @@ export default async function CardPage({ params }: { params: Promise<{ uuid: str
 
   return (
     <main className="flex flex-col gap-4">
-      <a href="/app" className="min-h-11 self-start text-sm font-medium text-[#7A3E12]">
+      <a href="/app" className="min-h-11 self-start text-sm font-medium text-accent">
         ← К ленте
       </a>
       <EventCard card={card} isOwn={isOwnDraft} />
@@ -170,7 +170,7 @@ export default async function CardPage({ params }: { params: Promise<{ uuid: str
       {card.chat_uuid !== null && (isAuthor || card.viewer_participates) ? (
         <a
           href={`/app/chats/${card.chat_uuid}`}
-          className="min-h-11 self-start rounded-md bg-[#7A3E12] px-4 py-2 text-sm font-medium text-white hover:bg-[#5E2F0D]"
+          className="min-h-11 self-start rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-ink hover:bg-accent-hover"
         >
           Открыть чат компании
         </a>

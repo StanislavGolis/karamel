@@ -14,7 +14,7 @@ export default function ConsentPage() {
     <main className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Подтверждение</h1>
-        <p className="text-sm text-[#5A5249]">
+        <p className="text-sm text-ink-secondary">
           Два пункта и пол — этого достаточно, чтобы начать. Анкета появится в следующем
           обновлении.
         </p>

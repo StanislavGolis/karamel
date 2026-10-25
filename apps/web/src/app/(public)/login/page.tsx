@@ -37,7 +37,7 @@ const DEFAULT_ERROR = "Не удалось войти. Попробуйте ещ
 
 /** Общие классы кнопок-провайдеров: одинаковое поведение мыши и фокуса. */
 const PROVIDER_BUTTON =
-  "flex min-h-11 items-center justify-center rounded-md border border-[#8A7A66] px-4 py-2 text-sm font-medium text-[#1F1B17] transition-colors hover:bg-[#F2ECE2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7A3E12]";
+  "flex min-h-11 items-center justify-center rounded-md border border-border-input px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 /**
  * Баннер отказа. Отдельный компонент, потому что только он трогает
@@ -54,7 +54,7 @@ async function LoginError({
   // то есть контролируется клиентом.
   const message = ERROR_MESSAGES[error] ?? DEFAULT_ERROR;
   return (
-    <p role="alert" className="rounded-md bg-[#FBE9E6] px-4 py-3 text-sm text-[#A0281C]">
+    <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-sm text-danger">
       {message}
     </p>
   );
@@ -69,7 +69,7 @@ export default function LoginPage({
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-4 py-16">
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-semibold tracking-tight">Вход в Карамель</h1>
-        <p className="text-sm text-[#5A5249]">
+        <p className="text-sm text-ink-secondary">
           Один аккаунт — одна анкета. Вход по номеру телефона или через Яндекс ID и VK ID.
         </p>
       </div>
@@ -91,7 +91,7 @@ export default function LoginPage({
 
       <PhoneLoginForm />
 
-      <Link href="/" className="text-sm text-[#5A5249] underline underline-offset-4">
+      <Link href="/" className="text-sm text-ink-secondary underline underline-offset-4">
         На главную
       </Link>
     </main>
