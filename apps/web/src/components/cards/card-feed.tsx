@@ -4,7 +4,7 @@
  * Лента карточек с фильтрами (UX §434 «Поверхность 1»; стори 4.5, Task 7.5,
  * 7.6; AC-09).
  *
- * Состояния ровно те, что требует UX: `loading` (три скелетона 180px без CLS),
+ * Состояния ровно те, что требует UX: `loading` (три скелетона 176px без CLS),
  * `loaded`, `empty` (карточек нет вообще), `empty-by-filter` (фильтр отсёк всё),
  * `error` (сеть/сервер). Разделение `empty` и `empty-by-filter` — не
  * педантизм: у них РАЗНЫЕ действия (UX §775). При «нет карточек» акцентная
@@ -62,12 +62,15 @@ function errorMessage(code: string): string {
   }
 }
 
-/** Скелетон карточки — фиксированная высота 180px (UX: CLS исключён). */
+/**
+ * Скелетон карточки — те же 176px, что у готовой (`h-44`), иначе CLS (L-DS3-3).
+ * §8.4 п.1: скелетон повторяет габариты, а не «примерно похож».
+ */
 function CardSkeleton() {
   return (
     <div
       aria-hidden="true"
-      className="h-[180px] animate-pulse rounded-lg border border-border bg-surface-raised"
+      className="h-44 animate-pulse rounded-lg border border-border bg-surface-raised"
     />
   );
 }
