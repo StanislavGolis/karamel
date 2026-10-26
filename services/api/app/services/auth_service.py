@@ -11,11 +11,14 @@ D-4 (стори 1.2): `commit()` здесь не вызывается — еди
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.repositories.users import UserRepository
+from app.services.account_deletion_service import deletion_window_expired
 from app.services.oauth import ExternalProfile
 
 
@@ -45,6 +48,11 @@ async def resolve_phone_user(session: AsyncSession, phone: str) -> tuple[User, b
     D-5: `provider_user_id` = нормализованный E.164, то есть тот же `phone`.
     Поиск идёт по паре `(provider, provider_user_id)` — через существующий метод,
     без второго пути уникальности.
+
+    Стори 10.1, D-10.1-5, задача 4.6: `community_slug` здесь НЕ передаётся.
+    Слаг подставляет `UserRepository.create()` из
+    `settings.default_community_slug` (ADR-01: при записи — из конфига, не от
+    клиента). Второй источник здесь дал бы расхождение с fallback'ом.
     """
     repository = UserRepository(session)
 
@@ -115,10 +123,15 @@ async def resolve_user(session: AsyncSession, profile: ExternalProfile) -> User:
 
 
 def _ensure_allowed(user: User) -> None:
-    """AC-03: бан и запрошенное удаление блокируют вход.
+    """AC-03: бан и УДАЛЕНИЕ С ИСТЁКШИМ ОКНОМ блокируют вход.
 
     Проверка на входе, а не только в `get_active`: иначе санкция снимается
     первым же входом через провайдера.
+
+    Стори 10.2, D-10.2-1: запрошенное удаление само по себе вход НЕ блокирует.
+    Блокирует только истёкшее 7-дневное окно (AC-06). Иначе пользователь не
+    вошёл бы и не смог отменить запрос (AC-01, AC-03), а окно превратилось бы
+    в мгновенный бан. Предикат один — `deletion_window_expired` (P-16).
     """
-    if user.status == "banned" or user.deletion_requested_at is not None:
+    if user.status == "banned" or deletion_window_expired(user, now=datetime.now(UTC)):
         raise UserBlockedError

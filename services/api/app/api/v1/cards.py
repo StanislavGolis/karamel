@@ -358,6 +358,9 @@ async def list_cards_endpoint(
             has_seats=has_seats,
             cursor=cursor,
             settings=settings,
+            # AC-05 стори 10.1, ADR-01/ADR-13: срез сообщества — колонка
+            # пользователя, не конфиг. Клиент слаг не присылает.
+            viewer_community_slug=reader.community_slug,
             # AC-09 стори 5б.2 (D-5b.2-7): зритель нужен для `viewer_participates`
             # — одним пакетным запросом на страницу, не N+1.
             viewer_id=reader.id,
@@ -394,6 +397,9 @@ async def get_card_endpoint(
             session,
             card_uuid=card_uuid,
             viewer_id=user.id,
+            # AC-05 стори 10.1, ADR-13: чужое сообщество даёт 404 по колонке
+            # пользователя, а не по конфигу.
+            viewer_community_slug=user.community_slug,
             settings=settings,
         )
     except CardNotFoundError as error:
@@ -712,6 +718,8 @@ async def card_participants_endpoint(
             session,
             viewer_id=user.id,
             card_uuid=card_uuid,
+            # AC-05 стори 10.1: срез сообщества — колонка пользователя.
+            viewer_community_slug=user.community_slug,
             settings=settings,
         )
     except ParticipantsNotFoundError as error:
@@ -770,6 +778,8 @@ async def get_attendance_endpoint(
             session,
             card_uuid=card_uuid,
             viewer_id=user.id,
+            # AC-05 стори 10.1: срез сообщества — колонка пользователя.
+            viewer_community_slug=user.community_slug,
             settings=settings,
         )
     except AttendanceNotFoundError as error:
@@ -808,6 +818,8 @@ async def confirm_attendance_endpoint(
             card_uuid=card_uuid,
             viewer_id=user.id,
             arrived=payload.arrived,
+            # AC-05 стори 10.1: срез сообщества — колонка пользователя.
+            viewer_community_slug=user.community_slug,
             settings=settings,
         )
     except (
@@ -862,6 +874,8 @@ async def report_no_show_endpoint(
             card_uuid=card_uuid,
             viewer_id=user.id,
             accused_uuid=payload.accused_uuid,
+            # AC-05 стори 10.1: срез сообщества — колонка пользователя.
+            viewer_community_slug=user.community_slug,
             settings=settings,
         )
     except (

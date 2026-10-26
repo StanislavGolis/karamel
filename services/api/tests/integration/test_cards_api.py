@@ -598,3 +598,66 @@ async def test_create_sets_no_store_header(client: AsyncClient, session: AsyncSe
 
     assert response.status_code == 201
     assert response.headers.get("cache-control") == "no-store"
+
+
+# --- P-10 (CR 10.1): HTTP-код 404 для чужого сообщества -----------------------
+
+
+async def test_get_foreign_community_card_is_404_over_http(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-05, ADR-13, P-10: чужое сообщество → HTTP `404`, не `403` и не `200`.
+
+    До этого теста AC-05 доказывался только на уровне сервиса
+    (`CardNotFoundError`). Переход `CardNotFoundError` → `404` держится на
+    `_domain_error` в роуте и не проверялся ни разу.
+
+    Пользователь чужого сообщества создаётся через `UserRepository.create`
+    с явным слагом; после DN-3 слаг обязан входить в `Settings.community_slugs`,
+    поэтому список сообществ расширяется на время создания (в пилоте сообщество
+    одно, второго в `.env` нет).
+    """
+    from app.repositories.users import UserRepository
+
+    # 1. Карточка сообщества пилота, опубликованная (иначе ленты/чтения нет).
+    # `GET /cards/{uuid}` стоит на `ConsentUser`: без согласия — `403`, и базовая
+    # линия упала бы не по предмету теста. Согласие ставится явно, как в
+    # `test_cards_feed_api.py:71-72`.
+    author, author_token = await _new_user(session)
+    author.age_confirmed = True
+    author.consent_given_at = datetime.now(UTC)
+    await session.flush()
+    card_uuid = await _create_card(client, session, author_token)
+    await _approve(session, card_uuid)
+    published = await client.post(
+        f"/api/v1/cards/{card_uuid}/publish", cookies={ACCESS_COOKIE_NAME: author_token}
+    )
+    assert published.status_code == 200, published.text
+
+    # 2. Базовая линия (P-19): автор сообщества карточку ВИДИТ.
+    own = await client.get(
+        f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: author_token}
+    )
+    assert own.status_code == 200, own.text
+
+    # 3. Зритель другого сообщества.
+    other = "other-city"
+    monkeypatch.setattr(
+        settings, "community_slugs", (*settings.community_slugs, other)
+    )
+    phone = f"+7906{uuid_lib.uuid4().int % 10**7:07d}"
+    stranger = await UserRepository(session).create(
+        provider="phone", provider_user_id=phone, phone=phone, community_slug=other
+    )
+    stranger.age_confirmed = True
+    stranger.consent_given_at = datetime.now(UTC)
+    await session.flush()
+    issued = await issue_session(session, stranger)
+
+    foreign = await client.get(
+        f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: issued.access_token}
+    )
+
+    # ADR-13: именно `404` — `403` раскрыл бы существование карточки.
+    assert foreign.status_code == 404, foreign.text
+    assert foreign.json()["code"] == "card_not_found"

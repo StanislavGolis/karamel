@@ -379,7 +379,14 @@ async def test_phone_taken_by_oauth_account(
     client: AsyncClient, sms: SpySmsProvider, session: AsyncSession
 ) -> None:
     """AC-05/D-6: номер занят OAuth-учёткой → 409, автосклейки нет."""
-    session.add(User(provider="yandex", provider_user_id="ya-1", phone=PHONE))
+    session.add(
+        User(
+            provider="yandex",
+            provider_user_id="ya-1",
+            phone=PHONE,
+            community_slug="tomsk",
+        )
+    )
     await session.flush()
 
     await _request_code(client)
@@ -405,16 +412,20 @@ async def test_phone_blocked_user(
     а не только на `/verify`. Раньше заблокированный бесконечно инициировал
     платные отправки, а отказ видел лишь после списания денег за SMS.
     """
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime, timedelta
 
     user = User(
         provider="phone",
         provider_user_id=PHONE,
         phone=PHONE,
+        community_slug="tomsk",
         status="banned" if banned else "active",
     )
     if not banned:
-        user.deletion_requested_at = datetime.now(UTC)
+        # Стори 10.2, D-10.2-1: блокирует только ИСТЁКШЕЕ окно удаления (AC-06).
+        # Прежняя версия ставила `now()` и защищала дефект: пользователь не мог
+        # войти по SMS, значит не мог отменить запрос (AC-01, AC-03).
+        user.deletion_requested_at = datetime.now(UTC) - timedelta(days=8)
     session.add(user)
     await session.flush()
 
@@ -553,7 +564,14 @@ async def test_verify_restores_code_on_phone_taken(
     пользователя: без возврата кода повтор требует нового SMS (деньги
     владельца) только чтобы увидеть тот же отказ.
     """
-    session.add(User(provider="yandex", provider_user_id="ya-1", phone=PHONE))
+    session.add(
+        User(
+            provider="yandex",
+            provider_user_id="ya-1",
+            phone=PHONE,
+            community_slug="tomsk",
+        )
+    )
     await session.flush()
 
     await _request_code(client)
@@ -667,3 +685,41 @@ async def test_garbage_without_code_does_not_burn_attempts(
         "/api/v1/auth/phone/verify", json={"phone": PHONE, "code": sms.last_code()}
     )
     assert response.status_code == 200
+
+
+# --- DN-3 (CR 10.1): 422 вместо 500 на невалидном сообществе ------------------
+
+
+async def test_verify_maps_community_slug_error_to_422(
+    client: AsyncClient, sms: SpySmsProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DN-3: доменная ошибка слага → `422 {code, message, details}`, не `500`.
+
+    На текущем пути `/verify` слаг не передаётся (`None` → fallback), поэтому
+    ветка защитная: она нужна, если слаг появится в API или в OAuth-профиле.
+    Тест проверяет именно МАППИНГ в HTTP-слой — без него ошибка репозитория
+    вышла бы наружу как `500`.
+
+    Доказательство откатом: убрать `except UserCommunitySlugError` в роуте —
+    тест красный (`500` вместо `422`).
+    """
+    from app.repositories.users import UNKNOWN_COMMUNITY_CODE, UserCommunitySlugError
+
+    await _clear_cooldown(PHONE)
+    await _request_code(client, PHONE)
+    code = sms.last_code()
+
+    async def _raise(session: Any, phone: str) -> tuple[Any, bool]:
+        raise UserCommunitySlugError(UNKNOWN_COMMUNITY_CODE, "paris")
+
+    monkeypatch.setattr(phone_auth, "resolve_phone_user", _raise)
+
+    response = await client.post("/api/v1/auth/phone/verify", json={"phone": PHONE, "code": code})
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["code"] == UNKNOWN_COMMUNITY_CODE
+    assert body["details"] == {"community_slug": "paris"}
+    assert "message" in body
+    # DN-3: код не сгорает — причина не в вводе пользователя.
+    assert "set-cookie" not in response.headers

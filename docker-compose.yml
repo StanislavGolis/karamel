@@ -130,6 +130,49 @@ services:
         condition: service_healthy
     mem_limit: 192m
 
+  # Стори 10.7 (AC-01/AC-03; D-10.7-5, NFR62): health-probe — ОТДЕЛЬНЫЙ контейнер,
+  # а не поток внутри api.
+  #
+  # Проба внутри api-процесса исчезает ровно тогда, когда api упал, — в
+  # единственном случае, ради которого она существует. Отдельный контейнер
+  # живёт на своём лимите памяти, виден в `docker compose ps` и не конкурирует
+  # с обработкой запросов.
+  #
+  # `healthcheck:` НЕ ставится НАМЕРЕННО: проверка probe — сам алерт, а
+  # healthcheck добавил бы второй, независимый сигнал «контейнер жив»,
+  # который ничего не говорит о наблюдаемом сервисе и при этом заставил бы
+  # compose перезапускать probe на каждом ложном срабатывании.
+  #
+  # `depends_on` только migrate+redis: api в зависимостях НЕТ — probe обязан
+  # стартовать и тогда, когда api не поднялся (иначе он бы не смог сообщить
+  # об этом). Он опрашивает api по HTTP через `API_URL` и получит отказ
+  # соединения, что и есть первая неудача.
+  health-probe:
+    build: ./services/api
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://karamel:karamel_pass@postgres:5432/karamel_db}
+      REDIS_URL: ${REDIS_URL:-redis://:karamel_redis_pass@redis:6379/0}
+      ENV: ${ENV:-development}
+      # Адрес api внутри сети compose: probe ходит на `/health/deep`.
+      API_URL: ${API_URL:-http://api:8000}
+      # Токен и чат через `${VAR:-}` — пустое значение допустимо (D-10.7-4):
+      # алертинг выключен, probe работает. Это НЕ ошибка старта.
+      ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
+      ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:-}
+      ALERT_PROBE_INTERVAL_SECONDS: ${ALERT_PROBE_INTERVAL_SECONDS:-60}
+      ALERT_CONSECUTIVE_FAILURES: ${ALERT_CONSECUTIVE_FAILURES:-2}
+    command: ["python", "-m", "app.workers.health_probe"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    mem_limit: 128m
+
   web:
     build: ./apps/web
     restart: unless-stopped
@@ -153,7 +196,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://karamel:karamel_pass@postgres:5432/karamel_db}
       REDIS_URL: ${REDIS_URL:-redis://:karamel_redis_pass@redis:6379/0}
       ENV: ${ENV:-development}
-    command: ["python", "-m", "app.workers.likes_reset"]
+    command: ["python", "-m", "app.workers.retention"]
     depends_on:
       migrate:
         condition: service_completed_successfully

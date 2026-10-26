@@ -46,8 +46,9 @@ async def test_card_queue_uses_index_without_sort(session: AsyncSession) -> None
         await session.execute(
             text(
                 "INSERT INTO users (provider, provider_user_id, phone, role, status, gender, "
-                "age_confirmed, consent_given_at) "
-                "VALUES ('phone', :pid, :pid, 'user', 'active', 'male', true, now()) RETURNING id"
+                "age_confirmed, consent_given_at, community_slug) "
+                "VALUES ('phone', :pid, :pid, 'user', 'active', 'male', true, "
+                "now(), 'tomsk') RETURNING id"
             ),
             # CHECK `ck_users_phone_required`: `phone` обязателен для провайдера
             # `phone` — без него вставка падает `IntegrityError`.
@@ -107,9 +108,9 @@ async def test_photo_queue_uses_index_without_sort(session: AsyncSession) -> Non
     await session.execute(
         text(
             "INSERT INTO users (provider, provider_user_id, phone, role, status, gender, "
-            "age_confirmed, consent_given_at) "
+            "age_confirmed, consent_given_at, community_slug) "
             "SELECT 'phone', '+7990' || lpad(g::text, 7, '0'), '+7990' || lpad(g::text, 7, '0'), "
-            "'user', 'active', 'male', true, now() "
+            "'user', 'active', 'male', true, now(), 'tomsk' "
             "FROM generate_series(1, :rows) AS g"
         ),
         {"rows": ROWS},
@@ -169,8 +170,9 @@ async def test_keyset_pagination_covers_all_rows_with_equal_timestamps(
         await session.execute(
             text(
                 "INSERT INTO users (provider, provider_user_id, phone, role, status, gender, "
-                "age_confirmed, consent_given_at) "
-                "VALUES ('phone', :pid, :pid, 'user', 'active', 'male', true, now()) RETURNING id"
+                "age_confirmed, consent_given_at, community_slug) "
+                "VALUES ('phone', :pid, :pid, 'user', 'active', 'male', true, "
+                "now(), 'tomsk') RETURNING id"
             ),
             {"pid": f"+7991{uuid_lib.uuid4().int % 10**7:07d}"},
         )

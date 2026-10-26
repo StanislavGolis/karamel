@@ -21,6 +21,7 @@ NFR60 `{type, payload, ts}` обязателен, а socket.io навязыва�
 from __future__ import annotations
 
 import uuid as uuid_lib
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -32,6 +33,7 @@ from app.repositories.chats import ChatRepository
 from app.repositories.join_requests import JoinRequestRepository
 from app.repositories.users import UserRepository
 from app.schemas.ws import WsEnvelope
+from app.services.account_deletion_service import deletion_window_expired
 from app.services.session_service import ACCESS_COOKIE_NAME
 from app.services.ws_hub import WsConnection, ws_hub
 
@@ -81,7 +83,11 @@ async def _authenticate(websocket: WebSocket) -> tuple[int, uuid_lib.UUID] | Non
             return None
         if _is_revoked(user, payload):
             return None
-        if user.status == "banned" or user.deletion_requested_at is not None:
+        # Стори 10.2, D-10.2-1: удаление блокирует WS только после истечения
+        # 7-дневного окна. До этого доступ сохраняется (AC-01) — иначе
+        # пользователь не смог бы отменить запрос. Тот же предикат, что в
+        # `api/deps.py` (P-16): второго условия окна нет.
+        if user.status == "banned" or deletion_window_expired(user, now=datetime.now(UTC)):
             return None
         return user.id, user.uuid
 

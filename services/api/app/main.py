@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1 import api_router
+from app.api.v1.health import router as health_router
 from app.core.body_limit import MULTIPART_OVERHEAD, BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.db import dispose_engine
@@ -403,3 +404,14 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
 async def health() -> dict[str, str]:
     """AC-01: GET /health → 200 {"status": "ok"} без обращения к внешним сервисам."""
     return {"status": "ok"}
+
+
+# Стори 10.7, Task 2.2 (AC-01, D-10.7-1): `/health/deep` — процесс + БД + Redis.
+# Подключается ЗДЕСЬ, а не через `api_router`: `include_router(api_router,
+# prefix="/api/v1")` дал бы `/api/v1/health/deep`, тогда как probe (Task 5.1)
+# и compose (Task 7.1) ждут `/health/deep` рядом с `/health`. Один маршрут —
+# один путь; второй адрес-алиас создал бы два контракта на один вопрос.
+# `healthcheck:` compose по-прежнему смотрит на `/health` и НЕ меняется:
+# при лежачей БД api обязан оставаться `healthy`, иначе перезапуск api сделает
+# недоступным и web (`docker-compose.yml:141-143`).
+app.include_router(health_router)

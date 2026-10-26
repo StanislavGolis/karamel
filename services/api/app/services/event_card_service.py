@@ -267,7 +267,13 @@ def _compute_expires_at(*, starts_at: datetime, window_minutes: int, now: dateti
 
 
 def _resolve_community_slug(settings: CardSettings) -> str:
-    """AC-01, ADR-01: слаг из конфига, а не из запроса.
+    """AC-01, ADR-01: слаг из конфига для ЗАПИСИ. Чтение — `user.community_slug`.
+
+    Стори 10.1, AC-05, задача 4.4: функция вызывается ТОЛЬКО из `create_card`.
+    Чтение карточки (`list_cards`, `get_card`) берёт слаг из
+    `viewer_community_slug` — то есть из `users.community_slug` зрителя.
+    Второй источник на чтении вернул бы «невидимое сообщество»: карточка
+    создана в конфиге, а ищется по колонке пользователя (CR 10.1, DN-1).
 
     Сверка с `community_slugs` обязательна: опечатка в `.env` создала бы
     карточку в «невидимом сообществе», которой нет ни в одной ленте
@@ -916,6 +922,7 @@ async def list_cards(
     cursor: str | None = None,
     limit: int = CARDS_PAGE_SIZE,
     settings: CardSettings,
+    viewer_community_slug: str,
     viewer_id: int | None = None,
     now: datetime | None = None,
 ) -> CardFeedPage:
@@ -923,10 +930,10 @@ async def list_cards(
 
     Порядок шагов намеренный (тот же, что в `list_places` 3.3):
 
-    1. Слаг берётся из `settings.default_community_slug` (ADR-01): параметра
-       в контракте нет, и клиент не может запросить чужое сообщество. Значение
-       сверяется с `community_slugs` — опечатка в `.env` иначе дала бы молча
-       пустую ленту вместо ошибки конфигурации;
+    1. Слаг берётся из `viewer_community_slug` — `users.community_slug`
+       зрителя (AC-05 стори 10.1, ADR-01/ADR-13): параметра в контракте нет,
+       и клиент не может запросить чужое сообщество. До 10.1 значение бралось
+       из конфига; теперь ось показа — сообщество пользователя;
     2. курсор декодируется ДО запроса: битое значение обязано стоить ноль
        запросов к БД (`422 invalid_cursor`, а не `500`);
     3. страница запрашивается с `limit + 1` строкой — так «есть ли следующая»
@@ -937,7 +944,7 @@ async def list_cards(
     `now` — параметр для тестов: реальное время подставляется один раз, и
     граница `starts_at >= now` не «плывёт» между страницей и `COUNT`.
     """
-    community_slug = _resolve_community_slug(settings)
+    community_slug = viewer_community_slug
     moment = now if now is not None else datetime.now(UTC)
 
     after: tuple[datetime, uuid_lib.UUID] | None = None
@@ -997,6 +1004,7 @@ async def get_card(
     *,
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
+    viewer_community_slug: str,
     settings: CardSettings,
     now: datetime | None = None,
 ) -> CardFeedItem:
@@ -1021,7 +1029,7 @@ async def get_card(
     «существует в другом городе» от «нет такой», то есть раскрыл бы
     существование карточки, которую участник не должен видеть.
     """
-    community_slug = _resolve_community_slug(settings)
+    community_slug = viewer_community_slug
     moment = now if now is not None else datetime.now(UTC)
 
     repo = EventCardRepository(session)

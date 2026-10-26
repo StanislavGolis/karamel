@@ -133,8 +133,9 @@ async def _seed_pair() -> tuple[int, int]:
                     await connection.execute(
                         text(
                             "INSERT INTO users (provider, provider_user_id, phone, role, "
-                            "gender, status) VALUES ('phone', :p, :p, 'user', 'female', "
-                            "'active') RETURNING id"
+                            "gender, status, community_slug) "
+                            "VALUES ('phone', :p, :p, 'user', 'female', 'active', "
+                            "'tomsk') RETURNING id"
                         ),
                         {"p": phone},
                     )
@@ -205,8 +206,9 @@ async def _seed_chat() -> tuple[int, int]:
                     await connection.execute(
                         text(
                             "INSERT INTO users (provider, provider_user_id, phone, role, "
-                            "gender, status) VALUES ('phone', :p, :p, 'user', 'female', "
-                            "'active') RETURNING id"
+                            "gender, status, community_slug) "
+                            "VALUES ('phone', :p, :p, 'user', 'female', 'active', "
+                            "'tomsk') RETURNING id"
                         ),
                         {"p": phone},
                     )
@@ -424,7 +426,8 @@ def test_single_head_and_down_revision() -> None:
     # Стори 9.3: вершина — `0031` (`notification_mutes`, D-9.3-4).
     # Сравнение с ТЕКУЩЕЙ вершиной, а не «тест номера»: собственные связки
     # `reports` проверяются ниже и от номера вершины не зависят.
-    assert _heads() == ("0031",)
+    # Стори 10.2: вершина — `0033` (частичный индекс `users.deletion_requested_at`).
+    assert _heads() == ("0033",)
     assert _down_revision_of("0025") == "0024"
     # Стори 7.5: звено `0024` (индекс истории явок) не меняет `0023`.
     assert _down_revision_of("0024") == "0023"

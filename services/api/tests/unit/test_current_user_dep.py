@@ -206,8 +206,15 @@ async def test_banned_user_gives_403_user_blocked() -> None:
 
 
 async def test_deletion_requested_gives_403() -> None:
-    """AC-05: запрошенное удаление блокирует доступ так же, как бан."""
-    user = _user(deletion_requested_at=datetime.now(UTC))
+    """AC-06 стори 10.2: удаление блокирует доступ только ПОСЛЕ истечения окна.
+
+    D-10.2-1: прежняя версия ставила `now()` и защищала дефект — мгновенный бан
+    вместо 7-дневного окна с возможностью отмены (AC-01, AC-03). `now() - 8 days`
+    выходит за окно `DELETION_WINDOW_DAYS = 7`, поэтому `403 user_blocked` здесь
+    корректен. Границы окна по обе стороны проверяет
+    `tests/unit/test_account_deletion_service.py` (P-19).
+    """
+    user = _user(deletion_requested_at=datetime.now(UTC) - timedelta(days=8))
     token = encode_access_token(user)
 
     with pytest.raises(HTTPException) as exc:
@@ -215,3 +222,17 @@ async def test_deletion_requested_gives_403() -> None:
 
     assert exc.value.status_code == 403
     assert exc.value.detail == {"code": "user_blocked"}
+
+
+async def test_deletion_requested_within_window_allows_access() -> None:
+    """AC-01 стори 10.2: активное окно доступ НЕ закрывает.
+
+    D-10.2-1: иначе пользователь не вошёл бы и не смог отменить запрос кнопкой
+    (AC-03). Проверяется именно `now()`, то есть окно только что открыто.
+    """
+    user = _user(deletion_requested_at=datetime.now(UTC))
+    token = encode_access_token(user)
+
+    result = await get_current_user(_request(cookie=token), _Session(user))
+
+    assert result is user

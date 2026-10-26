@@ -98,7 +98,10 @@ async def _create_user(session: AsyncSession, *, phone: str = "+79009990001") ->
     Через сырой SQL: тест схемы не должен зависеть от сервисов 1.x.
     """
     result = await session.execute(
-        text("INSERT INTO users (provider, phone) VALUES ('phone', :phone) RETURNING id"),
+        text(
+            "INSERT INTO users (provider, phone, community_slug) "
+            "VALUES ('phone', :phone, 'tomsk') RETURNING id"
+        ),
         {"phone": phone},
     )
     return int(result.scalar_one())

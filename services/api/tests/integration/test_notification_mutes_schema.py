@@ -56,8 +56,10 @@ async def _make_user(session: AsyncSession) -> int:
     phone = f"+7913{uuid_lib.uuid4().int % 10**7:07d}"
     row = await session.execute(
         text(
-            "INSERT INTO users (provider, provider_user_id, phone, role, gender, status) "
-            "VALUES ('phone', :p, :p, 'user', 'female', 'active') RETURNING id"
+            "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
+            "community_slug) "
+            "VALUES ('phone', :p, :p, 'user', 'female', 'active', 'tomsk') "
+            "RETURNING id"
         ),
         {"p": phone},
     )

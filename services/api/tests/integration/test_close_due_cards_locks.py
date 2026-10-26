@@ -246,6 +246,7 @@ async def test_lazy_read_takes_locks_in_same_order(capture: object) -> None:
             session,
             card_uuid=card_uuid,
             viewer_id=viewer.id if viewer_token else 0,
+            viewer_community_slug="tomsk",
             settings=_CardSettings(),
             now=datetime.now(UTC) + timedelta(minutes=1),
         )

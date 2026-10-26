@@ -1148,6 +1148,39 @@ class EventCardRepository:
         result = await self._session.execute(statement)
         return [int(row[0]) for row in result.all()]
 
+    async def count_overdue_windows(self, *, now: datetime, grace_minutes: int = 5) -> int:
+        """AC-03 стори 10.7 (NFR64, ADR-14): число зависших окон решения.
+
+        Предикат ADR-14 дословно: `status='published' AND expires_at <
+        :now - interval '5 minutes'`. Это контроль ОТКАЗА воркера, а не
+        обычная работа: `close_due_windows` закрывает окно через считанные
+        секунды после `expires_at`, поэтому ненулевой результат означает, что
+        воркер не отработал (лежит, падает, не видит БД) — то есть инцидент,
+        о котором надо сказать человеку.
+
+        Запас 5 минут, а не 0: цикл воркера — 60 с, дрожание расписания и
+        короткая блокировка дают окно в секунды, и контроль без запаса
+        поднимал бы ложный алерт на каждом прогоне.
+
+        Индекс `ix_event_cards_due_windows` (`models/event_card.py:359-363`)
+        покрывает предикат, поэтому запрос дешёвый: миграций не требуется (D-10.7-6).
+
+        `grace_minutes` — параметр, а не литерал в SQL: граница проверяется
+        тестом (`test_overdue_windows.py`) на `now()-10 мин` и `now()-1 мин`,
+        и второй прогон с отрицательным запасом воспроизводит «контроль
+        сработал на здоровом воркере».
+        """
+        statement = (
+            select(func.count())
+            .select_from(EventCard)
+            .where(
+                EventCard.status == EventCardStatus.PUBLISHED,
+                EventCard.expires_at < now - timedelta(minutes=grace_minutes),
+            )
+        )
+        result = await self._session.execute(statement)
+        return int(result.scalar_one())
+
     # ——— 5б.3: автовыбор первого по истечении окна (AC-01, AC-02, AC-03) ———
 
     @staticmethod

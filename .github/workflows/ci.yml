@@ -160,3 +160,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config -q
+      # Стори 10.7, Task 10.1 (AC-02): синтаксис скриптов бэкапа. `bash -n`
+      # разбирает файл, не выполняя его, — единственная проверка, возможная в
+      # раннере: `pg_dump`/`pg_restore` там нет (`pg-backup.sh` ставится на
+      # хост стенда, D-10.7-7). Поведение скриптов проверяют текстовые тесты
+      # (`tests/unit/test_backup_scripts.py`), а факт восстановления —
+      # процедура (W-10.7-a), не CI.
+      - name: Синтаксис скриптов бэкапа (bash -n)
+        run: bash -n scripts/backup/pg-backup.sh scripts/backup/media-backup.sh

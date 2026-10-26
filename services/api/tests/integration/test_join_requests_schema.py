@@ -91,7 +91,10 @@ async def _create_user(session: AsyncSession, *, phone: str | None = None) -> in
     """Создаёт учётку для FK `applicant_id`/`author_id` и возвращает её `id`."""
     phone = phone or _next_phone()
     result = await session.execute(
-        text("INSERT INTO users (provider, phone) VALUES ('phone', :phone) RETURNING id"),
+        text(
+            "INSERT INTO users (provider, phone, community_slug) "
+            "VALUES ('phone', :phone, 'tomsk') RETURNING id"
+        ),
         {"phone": phone},
     )
     return int(result.scalar_one())

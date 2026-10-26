@@ -2,26 +2,29 @@
 
 AC-01: состав колонок зафиксирован стори. `id` — внутренний PK, наружу не выходит;
 публичный идентификатор — `uuid` (AC-02).
-Поля `age_confirmed`, `consent_given_at` (FR9, 152-ФЗ) и `likes_used_today`,
-`likes_counted_on` (лимит лайков, FR4) добавлены сейчас: они участвуют в атомарных
-операциях и добавлять их позже — лишняя миграция на живой таблице.
+Поля `age_confirmed`, `consent_given_at` (FR9, 152-ФЗ) добавлены сейчас: они
+участвуют в атомарных операциях и добавлять их позже — лишняя миграция на живой
+таблице.
+
+История 10.1: механика лайков (`likes_used_today`, `likes_counted_on`, CHECK
+`likes_non_negative`) удалена вместе с колонками — разворот Action-first снял
+ось лайков, обращений в коде не осталось. Взамен добавлен `community_slug`
+(ADR-01): ось показа — сообщество, а не город.
 """
 
 from __future__ import annotations
 
 import uuid as uuid_lib
-from datetime import date, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    Date,
     DateTime,
     Identity,
     Index,
-    SmallInteger,
     String,
     UniqueConstraint,
     text,
@@ -70,10 +73,13 @@ class User(TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
     consent_given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    likes_used_today: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, default=0, server_default=text("0")
-    )
-    likes_counted_on: Mapped[date | None] = mapped_column(Date)
+    # AC-01, ADR-01: срез сообщества. FK нет — таблицы `communities` не
+    # существует. Форму держит regex-CHECK ниже; значения сверяет
+    # `UserRepository.create` (`_validate_community_slug`, DN-3 CR 10.1) —
+    # то есть только путь через репозиторий, а не сырой SQL и не воркер.
+    # `server_default` НЕ ставится: миграция 0032 снимает дефолт, иначе
+    # `alembic check` разойдётся со схемой.
+    community_slug: Mapped[str] = mapped_column(String(64), nullable=False)
     deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Решение 1 CR 1.5: момент отзыва всех сессий (выход, бан). Access-токен
     # живёт час и не сверяется с БД по `jti`, поэтому отзыв доказывается
@@ -122,8 +128,18 @@ class User(TimestampMixin, Base):
         ),
         # Пустой телефон неотличим от отсутствующего, но занимает слот в UNIQUE навсегда.
         CheckConstraint("phone IS NULL OR length(btrim(phone)) > 0", name="phone_not_blank"),
-        # Счётчик лайков не может быть отрицательным (лимит 0..5, но защита от багов)
-        CheckConstraint("likes_used_today >= 0", name="likes_non_negative"),
+        # AC-01, ADR-01: тот же шаблон, что в `ck_places_community_slug`.
+        # Расхождение с `Settings._COMMUNITY_SLUG_RE` дало бы 500 на сохранении.
+        CheckConstraint("community_slug ~ '^[a-z0-9_-]{3,64}$'", name="community_slug"),
         # индексы очереди модерации/бан-листов
         Index("idx_users_status", "status"),
+        # Стори 10.2, D-10.2-2: частичный индекс под предикат воркера ретенции
+        # (`deletion_requested_at <= now() - 7d`). Частичный, а не полный: NULL —
+        # состояние подавляющего большинства строк. Зеркало миграции `0033`:
+        # расхождение модели и миграции ломает `alembic check` (P-13).
+        Index(
+            "idx_users_deletion_requested_at",
+            "deletion_requested_at",
+            postgresql_where=text("deletion_requested_at IS NOT NULL"),
+        ),
     )

@@ -12,6 +12,8 @@ from app.api.v1.cards import router as cards_router
 from app.api.v1.chats import router as chats_router
 from app.api.v1.join_requests import requests_router as join_requests_own_router
 from app.api.v1.join_requests import router as join_requests_router
+from app.api.v1.me import router as me_router
+from app.api.v1.metrics import router as metrics_router
 from app.api.v1.moderation import router as moderation_router
 from app.api.v1.moderation_reports import router as moderation_reports_router
 from app.api.v1.moderation_support import router as moderation_support_router
@@ -106,3 +108,17 @@ api_router.include_router(support_router)
 # (`ticket_not_found`, `ticket_already_answered`). Тот же довод, что у
 # `/moderation/reports` (8.3) и `/moderation/users` (7.5).
 api_router.include_router(moderation_support_router)
+
+# Стори 10.2: `POST`/`GET`/`DELETE /me/delete` — 7-дневное окно удаления аккаунта
+# (FR10, NFR37, NFR40, NFR41). Отдельный модуль, а не ветка в `profiles.py`:
+# другой ресурс (`/me/delete` — операция над УЧЁТКОЙ, анкета — про человека) и
+# другой набор кодов (`deletion_already_requested`). Расширять `GET /profiles/me`
+# полем `deletion_*` отказано (D-10.2-6): один ответ не смешивает две оси (§6).
+api_router.include_router(me_router)
+
+# Стори 10.5: `GET /metrics` — метрики пилота для кабинета администратора
+# (AC-01…AC-05). Отдельный модуль, а не ветка `moderation.py`: другой ресурс
+# (метрики пилота, а не очередь карточек) и свой набор кодов
+# (`invalid_period`, `period_too_long`). Гард тот же — `ModeratorUser`
+# (D-10.5-1): отдельной роли `admin` в `UserRole` нет и не заводится.
+api_router.include_router(metrics_router)

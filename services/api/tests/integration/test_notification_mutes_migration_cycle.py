@@ -91,8 +91,9 @@ def _make_user() -> int:
                 result = await connection.execute(
                     text(
                         "INSERT INTO users (provider, provider_user_id, phone, "
-                        "role, gender, status) "
-                        "VALUES ('phone', :p, :p, 'user', 'female', 'active') RETURNING id"
+                        "role, gender, status, community_slug) "
+                        "VALUES ('phone', :p, :p, 'user', 'female', 'active', "
+                        "'tomsk') RETURNING id"
                     ),
                     {"p": f"+7914{uuid_lib.uuid4().int % 10**7:07d}"},
                 )
@@ -103,11 +104,12 @@ def _make_user() -> int:
     return asyncio.run(run())
 
 
-def test_0031_is_the_single_head() -> None:
-    """Ровно один head — `0031`. Развилка head'ов сделала бы `upgrade head`
+def test_single_head_is_0033() -> None:
+    """Ровно один head — `0033`. Развилка head'ов сделала бы `upgrade head`
     недетерминированным, а `down_revision` перепутанным (D-9.3-4)."""
     heads = tuple(ScriptDirectory.from_config(_config()).get_heads())
-    assert heads == ("0031",)
+    # Стори 10.2: вершина стала `0033` (частичный индекс `users.deletion_requested_at`).
+    assert heads == ("0033",)
 
 
 def test_0031_continues_0030() -> None:

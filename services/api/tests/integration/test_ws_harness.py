@@ -220,16 +220,16 @@ def test_testclient_ws_reaches_stub_through_http_transport() -> None:
 
 _USER_INSERTS = {
     901: (
-        "INSERT INTO users (id, provider, provider_user_id, phone) "
-        "VALUES (901, 'phone', 'p6-901', '+79070000901')"
+        "INSERT INTO users (id, provider, provider_user_id, phone, community_slug) "
+        "VALUES (901, 'phone', 'p6-901', '+79070000901', 'tomsk')"
     ),
     902: (
-        "INSERT INTO users (id, provider, provider_user_id, phone) "
-        "VALUES (902, 'phone', 'p6-902', '+79070000902')"
+        "INSERT INTO users (id, provider, provider_user_id, phone, community_slug) "
+        "VALUES (902, 'phone', 'p6-902', '+79070000902', 'tomsk')"
     ),
     903: (
-        "INSERT INTO users (id, provider, provider_user_id, phone) "
-        "VALUES (903, 'phone', 'p6-903', '+79070000903')"
+        "INSERT INTO users (id, provider, provider_user_id, phone, community_slug) "
+        "VALUES (903, 'phone', 'p6-903', '+79070000903', 'tomsk')"
     ),
 }
 

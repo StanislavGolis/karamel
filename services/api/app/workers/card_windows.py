@@ -36,7 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
 from app.core.db import get_session_factory
+from app.core.redis import get_redis
 from app.repositories.event_cards import EventCardRepository
+from app.services.alert_service import send_alert
 from app.services.card_decision_service import DecisionOutcome, close_due_card
 from app.services.event_card_service import finish_started_cards
 from app.workers.attendance_prompts import run_attendance_prompts
@@ -48,6 +50,11 @@ WORKER_INTERVAL_SECONDS = 60
 # Размер батча на один прогон (см. `CARDS_WORKER_BATCH` в сервисе): воркер
 # обязан возвращать управление, даже если накопились тысячи карточек.
 WORKER_BATCH_SIZE = 200
+# Стори 10.7, Task 6.2 (AC-03, D-10.7-6): ключ дедупа алерта о зависшем окне.
+# Отдельный от health-алерта: два разных инцидента не должны глушить друг
+# друга в одном часовом окне. Без дедупа зависшее окно слало бы 1440 сообщений
+# в сутки, и бот был бы замьючен — канал исчез бы, когда он нужен.
+WINDOW_OVERDUE_ALERT_KEY = "alert:window_overdue:sent"
 
 logger = structlog.get_logger(__name__)
 
@@ -81,6 +88,46 @@ async def close_due_windows(
         if result.outcome in (DecisionOutcome.SELECTED, DecisionOutcome.CLOSED_NO_CHOICE):
             handled += 1
     return handled
+
+
+async def check_overdue_windows(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    now: datetime,
+    duration_ms: int,
+) -> int:
+    """AC-03 стори 10.7 (NFR64, ADR-14): контроль зависших окон + алерт.
+
+    **Зачем отдельная функция.** `run_once` — триста строк переходов; контроль
+    внутри него было бы нечем проверить иначе, как прогоном всех переходов
+    (медленно и с побочными эффектами). Здесь проверяется ровно контроль:
+    счётчик, лог, дедуп.
+
+    **Лог — КАЖДЫЙ прогон, алерт — раз в час** (D-10.7-6). Лог отвечает на
+    вопрос «инцидент продолжается?», алерт — «пора будить человека?». Без
+    дедупа зависшее окно слало бы 1440 сообщений в сутки, и бот был бы
+    замьючен в первый день — канал исчез бы ровно тогда, когда нужен.
+
+    Возвращает число зависших окон: `run_once` не возвращает его наружу
+    (словарь `run_once` — контракт существующих тестов), но тесту и будущему
+    метрическому счётчику оно нужно.
+    """
+    async with session_factory() as session:
+        overdue = await EventCardRepository(session).count_overdue_windows(now=now)
+    if overdue <= 0:
+        return 0
+
+    logger.error("worker.window.overdue", count=overdue, duration_ms=duration_ms)
+    # Ошибка отправки НЕ пробрасывается: контроль — диагностика, и его отказ
+    # не должен отменять уже выполненные переходы прогона. `send_alert` сам
+    # возвращает `False` на любом отказе, а `RedisError` из дедупа гасится
+    # внутри него (D-10.7-3).
+    await send_alert(
+        f"env={settings.env} check=window_overdue count={overdue} duration_ms={duration_ms}",
+        key=WINDOW_OVERDUE_ALERT_KEY,
+        redis=get_redis(),
+    )
+    return overdue
 
 
 async def run_once(
@@ -139,6 +186,15 @@ async def run_once(
     prompts = await run_attendance_prompts(session_factory, now=moment, limit=limit)
 
     duration_ms = int((time.monotonic() - started) * 1000)
+
+    # Стори 10.7, Task 6.2 (AC-03, NFR64, ADR-14): контроль ЗАВИСШИХ окон.
+    # Считается ПОСЛЕ всех переходов: карточка, закрытая этим же прогоном,
+    # не должна попасть в контроль (иначе каждый прогон давал бы алерт
+    # на собственную работу воркера). Предикат ADR-14 — `expires_at <
+    # now() - 5 минут`: здоровый воркер закрывает окно за секунды, поэтому
+    # ненулевой результат означает, что воркер не отработал.
+    await check_overdue_windows(session_factory, now=moment, duration_ms=duration_ms)
+
     if closed:
         logger.info("worker.card.closed", count=closed, duration_ms=duration_ms)
     if finished:

@@ -120,6 +120,7 @@ async def list_card_participants(
     *,
     viewer_id: int,
     card_uuid: uuid_lib.UUID,
+    viewer_community_slug: str,
     settings: ParticipantsSettings,
 ) -> CardParticipants:
     """AC-01…AC-05: состав компании для её участника.
@@ -150,6 +151,10 @@ async def list_card_participants(
             session,
             card_uuid=card_uuid,
             viewer_id=viewer_id,
+            # AC-05 стори 10.1: срез сообщества — колонка зрителя, не конфиг.
+            # Здесь зритель — участник/заявитель карточки, его слаг уже прочитан
+            # выше по коду (тот же пользователь, что и `viewer_id`).
+            viewer_community_slug=viewer_community_slug,
             settings=settings,
         )
     except CardNotFoundError as error:

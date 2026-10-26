@@ -25,6 +25,7 @@ from app.core.security import (
 from app.models.user import User
 from app.repositories.refresh_tokens import RefreshTokenRepository
 from app.repositories.users import UserRepository
+from app.services.account_deletion_service import deletion_window_expired
 from app.services.auth_service import UserBlockedError
 
 
@@ -179,7 +180,7 @@ async def rotate_session(session: AsyncSession, raw_refresh_token: str) -> Issue
         # а не бан (403). «Заблокирован» для несуществующего пользователя
         # вводит клиента в заблуждение и не даёт выйти на экран входа.
         raise SessionExpiredError
-    if user.status == "banned" or user.deletion_requested_at is not None:
+    if user.status == "banned" or deletion_window_expired(user, now=datetime.now(UTC)):
         await repository.revoke_all_for_user(stored.user_id)
         # CR 1.5, патч 1: отзыв токенов и метка `sessions_revoked_at`
         # должны попасть в БД — иначе бан не действует до конца сессии.

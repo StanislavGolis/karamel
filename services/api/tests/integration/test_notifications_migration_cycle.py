@@ -57,6 +57,11 @@ _INSERT_USER = (
     "INSERT INTO users (provider, provider_user_id, phone, role, gender, status) "
     "VALUES ('phone', :p, :p, 'user', 'female', 'active') RETURNING id"
 )
+_INSERT_USER_HEAD = (
+    "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
+    "community_slug) "
+    "VALUES ('phone', :p, :p, 'user', 'female', 'active', 'tomsk') RETURNING id"
+)
 _INSERT_PLACE = (
     "INSERT INTO places (name, category, address_text, community_slug, is_active) "
     "VALUES ('B', 'cafe', 'A', 'tomsk', true) RETURNING id"
@@ -93,7 +98,7 @@ async def _new_user() -> int:
     try:
         async with engine.begin() as connection:
             result = await connection.execute(
-                text(_INSERT_USER), {"p": f"+7909{uuid_lib.uuid4().int % 10**7:07d}"}
+                text(_INSERT_USER_HEAD), {"p": f"+7909{uuid_lib.uuid4().int % 10**7:07d}"}
             )
             return int(result.scalar_one())
     finally:
@@ -222,7 +227,8 @@ def test_single_head_and_down_revision() -> None:
     # ниже от номера вершины не зависит, поэтому тест остаётся осмысленным.
     # Сравнение с ТЕКУЩЕЙ вершиной, а не «тестом номера»: собственная связка
     # `0021 -> 0020` проверяется ниже и от номера вершины не зависит.
-    assert _heads() == ("0031",)
+    # Стори 10.2: вершина — `0033` (индекс удаления).
+    assert _heads() == ("0033",)
     assert _down_revision_of_0021() == "0020"
     assert _down_revision_of("0022") == "0021"
     assert _down_revision_of("0023") == "0022"
@@ -419,7 +425,8 @@ def test_downgrade_guard_keeps_rows() -> None:
     # ниже от номера вершины не зависит, поэтому тест остаётся осмысленным.
     # Сравнение с ТЕКУЩЕЙ вершиной, а не «тестом номера»: собственная связка
     # `0021 -> 0020` проверяется ниже и от номера вершины не зависит.
-    assert _heads() == ("0031",)
+    # Стори 10.2: вершина — `0033` (индекс удаления).
+    assert _heads() == ("0033",)
 
 
 # ——— D-TD-1: backfill ——————————————————————————————————————————

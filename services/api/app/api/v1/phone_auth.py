@@ -11,6 +11,7 @@ D-9: все отказы — `JSONResponse` с `{"code": "..."}` из фикси
 from __future__ import annotations
 
 import contextlib
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
@@ -21,7 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.db import get_session
 from app.core.logging import log_oauth_event
-from app.repositories.users import UserRepository
+from app.repositories.users import UserCommunitySlugError, UserRepository
+from app.services.account_deletion_service import deletion_window_expired
 from app.services.auth_service import PhoneTakenError, UserBlockedError, resolve_phone_user
 from app.services.phone import InvalidPhoneError, normalize_phone
 from app.services.session_service import issue_session, set_session_cookies
@@ -392,6 +394,28 @@ async def verify(
             external_id=phone,
         )
         return JSONResponse({"code": "phone_taken"}, status_code=409)
+    except UserCommunitySlugError as error:
+        # DN-3 (CR 10.1): слаг отвергнут ДО `INSERT` — это семантика домена
+        # (проект-контекст §4: `422`, не `400`: запрос синтаксически верен).
+        # Код не сгорает: причина не в коде из SMS, и повторять ввод бессмысленно,
+        # но и жечь попытку за конфигурационную ошибку нельзя — та же логика,
+        # что в патче 12 CR 1.4.
+        await _restore_code(phone, code)
+        log_oauth_event(
+            "phone_verify_failed",
+            provider=PROVIDER,
+            stage="verify",
+            error_code=error.code.lower(),
+            external_id=phone,
+        )
+        return JSONResponse(
+            {
+                "code": error.code,
+                "message": "сообщество пользователя не сконфигурировано",
+                "details": {"community_slug": error.community_slug},
+            },
+            status_code=422,
+        )
     except UserBlockedError:
         # AC-05: бан и запрошенное удаление блокируют вход.
         # CR 1.4, патч 12: код возвращается — иначе бан навсегда съедал SMS.
@@ -442,15 +466,20 @@ async def _attempts_left(phone: str) -> int | None:
 
 
 async def _is_blocked(session: AsyncSession, phone: str) -> bool:
-    """AC-05 (CR 1.4, патч 11): бан или запрошенное удаление до отправки SMS.
+    """AC-05 (CR 1.4, патч 11): бан или удаление с ИСТЁКШИМ окном — до отправки SMS.
 
     Проверка только по номеру: учётки с таким `provider_user_id` ещё может не
     быть, и это нормально — тогда отправка разрешена.
+
+    Стори 10.2, D-10.2-1: без этой правки вход по SMS невозможен в активном
+    окне — значит, недостижима и отмена (AC-01, AC-03). Блокирует только
+    истёкшее окно (AC-06), и предикат берётся из сервиса, а не пишется здесь
+    заново (P-16: «5 из 5»).
     """
     user = await UserRepository(session).get_by_provider_user_id(PROVIDER, phone)
     if user is None:
         return False
-    return user.status == "banned" or user.deletion_requested_at is not None
+    return user.status == "banned" or deletion_window_expired(user, now=datetime.now(UTC))
 
 
 async def _restore_code(phone: str, code: str) -> None:

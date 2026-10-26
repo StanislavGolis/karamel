@@ -30,8 +30,9 @@ async def _user(session: AsyncSession) -> int:
     row = await session.execute(
         text(
             "INSERT INTO users (uuid, provider, provider_user_id, phone, role, status, "
-            "age_confirmed, consent_given_at) "
-            "VALUES (gen_random_uuid(), 'phone', :p, :p, 'user', 'active', true, now()) "
+            "age_confirmed, consent_given_at, community_slug) "
+            "VALUES (gen_random_uuid(), 'phone', :p, :p, 'user', 'active', "
+            "true, now(), 'tomsk') "
             "RETURNING id"
         ),
         {"p": phone},

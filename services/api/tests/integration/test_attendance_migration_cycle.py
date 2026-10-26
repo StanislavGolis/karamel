@@ -119,9 +119,9 @@ async def _seed_attendance_row() -> str:
                 await connection.execute(
                     text(
                         "INSERT INTO users (uuid, provider, provider_user_id, phone, role, status, "
-                        "age_confirmed, consent_given_at) "
+                        "age_confirmed, consent_given_at, community_slug) "
                         "VALUES (gen_random_uuid(), 'phone', :pid, :phone, 'user', 'active', "
-                        "true, now()) RETURNING id"
+                        "true, now(), 'tomsk') RETURNING id"
                     ),
                     {
                         "pid": f"author-{suffix}",
@@ -133,9 +133,9 @@ async def _seed_attendance_row() -> str:
                 await connection.execute(
                     text(
                         "INSERT INTO users (uuid, provider, provider_user_id, phone, role, status, "
-                        "age_confirmed, consent_given_at) "
+                        "age_confirmed, consent_given_at, community_slug) "
                         "VALUES (gen_random_uuid(), 'phone', :pid, :phone, 'user', 'active', "
-                        "true, now()) RETURNING id"
+                        "true, now(), 'tomsk') RETURNING id"
                     ),
                     {
                         "pid": f"part-{suffix}",

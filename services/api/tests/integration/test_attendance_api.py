@@ -777,6 +777,7 @@ async def test_boundary_starts_at_equals_now_allows(
         card_uuid=uuid_lib.UUID(company["card_uuid"]),
         viewer_id=company["member"].id,
         arrived=True,
+        viewer_community_slug=_Settings.default_community_slug,
         settings=_Settings(),
         now=starts_at,
     )
@@ -801,6 +802,7 @@ async def test_published_past_card_allows_confirmation(
         card_uuid=uuid_lib.UUID(company["card_uuid"]),
         viewer_id=company["member"].id,
         arrived=True,
+        viewer_community_slug=_Settings.default_community_slug,
         settings=_Settings(),
     )
 
@@ -1222,5 +1224,6 @@ async def test_self_confirm_guard_blocks_service_call(
             card_uuid=uuid_lib.UUID(company["card_uuid"]),
             viewer_id=author_id,
             arrived=True,
+            viewer_community_slug=_Settings.default_community_slug,
             settings=cast(Any, _Settings()),
         )

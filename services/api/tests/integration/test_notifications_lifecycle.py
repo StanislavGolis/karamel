@@ -756,6 +756,7 @@ async def test_lazy_close_survives_recipient_read_failure(
             session,
             card_uuid=card_uuid,
             viewer_id=applicant.id,
+            viewer_community_slug="tomsk",
             settings=_CardSettings(),
         )
         await session.commit()
@@ -871,6 +872,7 @@ async def test_lazy_close_creates_notifications(
             session,
             card_uuid=card_uuid,
             viewer_id=applicant.id,
+            viewer_community_slug="tomsk",
             settings=_CardSettings(),
         )
         await session.commit()

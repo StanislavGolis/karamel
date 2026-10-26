@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid as uuid_lib
 from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
@@ -25,6 +25,7 @@ from app.core.security import InvalidTokenError, decode_access_token
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.users import UserRepository
+from app.services.account_deletion_service import deletion_window_expired
 from app.services.session_service import ACCESS_COOKIE_NAME
 
 UNAUTHENTICATED = {"code": "unauthenticated"}
@@ -133,7 +134,12 @@ async def get_current_user(
 
     # Task 1.5 (AC-05): бан и запрошенное удаление — 403, не 401.
     # 401 заставил бы клиента идти обновлять сессию и создал шторм refresh.
-    if user.status == "banned" or user.deletion_requested_at is not None:
+    #
+    # Стори 10.2, D-10.2-1: удаление блокирует доступ только ПОСЛЕ истечения
+    # 7-дневного окна (AC-06). До этого доступ сохраняется — иначе пользователь
+    # не вошёл бы и не смог нажать «отменить» (AC-01, AC-03). Единственный
+    # предикат окна — `deletion_window_expired`, второй копии условия нет (P-16).
+    if user.status == "banned" or deletion_window_expired(user, now=datetime.now(UTC)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=USER_BLOCKED)
 
     return user

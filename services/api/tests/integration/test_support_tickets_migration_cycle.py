@@ -40,8 +40,9 @@ pytestmark = [
 API_ROOT = Path(__file__).resolve().parents[2]
 
 _INSERT_USER = (
-    "INSERT INTO users (provider, provider_user_id, phone, role, gender, status) "
-    "VALUES ('phone', :p, :p, 'user', 'female', 'active') RETURNING id"
+    "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
+    "community_slug) "
+    "VALUES ('phone', :p, :p, 'user', 'female', 'active', 'tomsk') RETURNING id"
 )
 
 _INSERT_NOTIFICATION = (
@@ -108,11 +109,12 @@ def _count_users() -> int:
 # ---------------------------------------------------------------------------
 
 
-def test_0031_is_the_single_head() -> None:
-    """Ровно один head — `0031`. Развилка head'ов сделала бы `upgrade head`
-    недетерминированным, а `down_revision` из эпика (`0013`) — неверным (D-9.1-5)."""
+def test_0033_is_the_single_head() -> None:
+    """Ровно один head — `0033` (стори 10.2, индекс удаления). Развилка head'ов сделала бы
+    `upgrade head` недетерминированным, а `down_revision` из эпика (`0013`) — неверным (D-9.1-5)."""
     heads = tuple(ScriptDirectory.from_config(_config()).get_heads())
-    assert heads == ("0031",)
+    # Стори 10.2: вершина стала `0033` (частичный индекс `users.deletion_requested_at`).
+    assert heads == ("0033",)
 
 
 def test_downgrade_leaves_no_residue_of_support_tickets() -> None:

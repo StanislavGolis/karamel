@@ -85,7 +85,10 @@ async def test_invalid_status_rejected(session: AsyncSession) -> None:
 async def test_database_generates_uuid(session: AsyncSession) -> None:
     """D-2: `gen_random_uuid()` работает для вставок вне ORM (psql, скрипты)."""
     await session.execute(
-        text("INSERT INTO users (provider, phone) VALUES ('phone', '+79009990011')")
+        text(
+            "INSERT INTO users (provider, phone, community_slug) "
+            "VALUES ('phone', '+79009990011', 'tomsk')"
+        )
     )
 
     generated = await session.scalar(text("SELECT uuid FROM users WHERE phone = '+79009990011'"))
@@ -152,3 +155,106 @@ async def test_banned_user_token_not_active(session: AsyncSession) -> None:
     await session.flush()
 
     assert await tokens.get_active(raw_hash) is None
+
+
+# --- DN-3 (CR 10.1): валидация `community_slug` до INSERT --------------------
+
+
+async def test_create_rejects_slug_outside_config(session: AsyncSession) -> None:
+    """DN-3: `'paris'` — форма валидна, но сообщества нет в конфиге → отказ.
+
+    Мутация «снять сверку с `Settings.community_slugs`» оставляет этот тест
+    красным: без неё пользователь создался бы в несуществующем сообществе
+    и не увидел ни одной карточки. Через `create()`, а не прямым `INSERT`:
+    иначе мутация в репозитории выживает (класс из CR 9.x).
+    """
+    from app.repositories.users import UNKNOWN_COMMUNITY_CODE, UserCommunitySlugError
+
+    repo = UserRepository(session)
+
+    with pytest.raises(UserCommunitySlugError) as exc:
+        await repo.create(provider="phone", phone="+79001110001", community_slug="paris")
+
+    assert exc.value.code == UNKNOWN_COMMUNITY_CODE
+    assert exc.value.community_slug == "paris"
+
+
+async def test_create_rejects_empty_slug_as_domain_error(session: AsyncSession) -> None:
+    """DN-3: `''` — `422`-класс домена, не `IntegrityError` → `500`.
+
+    До правки пустая строка доходила до `ck_users_community_slug`,
+    `auth_service` разбирал `IntegrityError` как гонку и отдавал `500`.
+    """
+    from app.repositories.users import INVALID_COMMUNITY_SLUG_CODE, UserCommunitySlugError
+
+    repo = UserRepository(session)
+
+    with pytest.raises(UserCommunitySlugError) as exc:
+        await repo.create(provider="phone", phone="+79001110002", community_slug="")
+
+    assert exc.value.code == INVALID_COMMUNITY_SLUG_CODE
+
+
+async def test_create_rejects_overlong_slug_as_domain_error(session: AsyncSession) -> None:
+    """DN-3: 65 символов — `DataError` до правки, `500` без ветки обработки.
+
+    Граница 64/65 проверяется снаружи CHECK (P-15): без этого шаблон
+    `{3,}` без верхней границы остался бы незамеченным.
+    """
+    from app.repositories.users import INVALID_COMMUNITY_SLUG_CODE, UserCommunitySlugError
+
+    repo = UserRepository(session)
+
+    with pytest.raises(UserCommunitySlugError) as exc:
+        await repo.create(provider="phone", phone="+79001110003", community_slug="a" * 65)
+
+    assert exc.value.code == INVALID_COMMUNITY_SLUG_CODE
+
+
+async def test_create_rejects_bad_form_slug(session: AsyncSession) -> None:
+    """DN-3: `'Tomsk'` и `'ab'` — форма нарушена, отказ до INSERT."""
+    from app.repositories.users import INVALID_COMMUNITY_SLUG_CODE, UserCommunitySlugError
+
+    repo = UserRepository(session)
+
+    for bad in ("Tomsk", "ab", "tom sk"):
+        with pytest.raises(UserCommunitySlugError) as exc:
+            await repo.create(provider="phone", phone="+79001110004", community_slug=bad)
+        assert exc.value.code == INVALID_COMMUNITY_SLUG_CODE, bad
+
+
+async def test_create_accepts_slug_from_config(session: AsyncSession) -> None:
+    """DN-3, P-19: положительная линия — слаг из конфига ПРОХОДИТ.
+
+    Без этой половины предыдущие тесты были бы зелёными и при валидации,
+    отвергающей любой слаг.
+    """
+    from app.core.config import settings
+
+    repo = UserRepository(session)
+    slug = settings.community_slugs[0]
+
+    user = await repo.create(provider="phone", phone="+79001110005", community_slug=slug)
+
+    assert user.community_slug == slug
+
+
+async def test_create_none_slug_falls_back_to_config(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DN-3, D-10.1-5, P-19: `None` → `settings.default_community_slug`, а не литерал.
+
+    `default_community_slug` подменяется на значение ИЗ `community_slugs`,
+    отличное от `'tomsk'` по умолчанию: иначе подмена на литерал `'tomsk'`
+    в `create()` осталась бы незамеченной (конфиг и литерал совпадают).
+    """
+    from app.core.config import settings
+
+    other = "kemerovo"
+    monkeypatch.setattr(settings, "community_slugs", (other,))
+    monkeypatch.setattr(settings, "default_community_slug", other)
+
+    repo = UserRepository(session)
+    user = await repo.create(provider="phone", phone="+79001110006")
+
+    assert user.community_slug == other

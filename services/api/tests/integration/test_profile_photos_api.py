@@ -1072,7 +1072,7 @@ async def test_edits_do_not_touch_users_or_create_rows(
     а число строк в `profiles`/`profile_photos` меняется только на ожидаемое.
 
     §18.1: если правка анкеты начнёт писать в `users` (например, сбрасывать
-    `status` или `likes_used_today`), либо создавать заявку — тест краснеет
+    `status` или `deletion_requested_at`), либо создавать заявку — тест краснеет
     на первом же отличии снимка.
     """
     user, token = await _new_user(session)

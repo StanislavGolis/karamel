@@ -10,6 +10,7 @@ AC-02: доступ снаружи — только `get_by_uuid`; `get_by_id` �
 
 from __future__ import annotations
 
+import re
 import uuid as uuid_lib
 from typing import Any
 
@@ -18,6 +19,51 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from app.models.user import User
+
+COMMUNITY_SLUG_PATTERN = re.compile(r"[a-z0-9_-]{3,64}")
+
+# DN-3 (CR 10.1): коды отказа — верхний регистр через подчёркивания, как
+# `PLACE_UNKNOWN_COMMUNITY`. Две причины разделены намеренно: сообщества нет
+# (данные устарели) и форма не та (битый ввод) — действия клиента разные.
+UNKNOWN_COMMUNITY_CODE = "UNKNOWN_COMMUNITY"
+INVALID_COMMUNITY_SLUG_CODE = "INVALID_COMMUNITY_SLUG"
+
+
+class UserCommunitySlugError(Exception):
+    """DN-3 (CR 10.1): слаг сообщества отвергнут ДО `INSERT`.
+
+    Без этой проверки обе причины доходили до БД: неверная форма ломала
+    `ck_users_community_slug` (`IntegrityError`, который `auth_service`
+    разбирал как гонку и отдавал `500`), переполнение — `DataError`, не
+    перехватываемый вовсе. ADR-01 требует сверки значений с
+    `Settings.community_slugs` на записи; здесь она и выполняется.
+    """
+
+    def __init__(self, code: str, community_slug: str) -> None:
+        super().__init__(code)
+        self.code = code
+        self.community_slug = community_slug
+
+
+def _validate_community_slug(community_slug: str, community_slugs: object) -> None:
+    """DN-3: форма и принадлежность конфигу — до обращения к БД.
+
+    Рантайм-гард к типовому (тот же приём, что `place_service._resolve_...`):
+    `in` по строке ищет ПОДСТРОКУ, и `community_slugs = "tomsk"` пропустил бы
+    слаг `toms`.
+    """
+    is_valid_form = isinstance(community_slug, str) and (
+        COMMUNITY_SLUG_PATTERN.fullmatch(community_slug) is not None
+    )
+    if not is_valid_form:
+        raise UserCommunitySlugError(INVALID_COMMUNITY_SLUG_CODE, str(community_slug))
+    if not isinstance(community_slugs, (tuple, list)):
+        raise TypeError(
+            "settings.community_slugs должен быть последовательностью слагов, "
+            f"получено {type(community_slugs).__name__}"
+        )
+    if community_slug not in community_slugs:
+        raise UserCommunitySlugError(UNKNOWN_COMMUNITY_CODE, community_slug)
 
 
 class UserRepository:
@@ -108,8 +154,34 @@ class UserRepository:
         role: str = "user",
         gender: str | None = None,
         status: str = "active",
+        community_slug: str | None = None,
     ) -> User:
-        """Создаёт запись. Коммит — на вызывающей стороне (единица работы)."""
+        """Создаёт запись. Коммит — на вызывающей стороне (единица работы).
+
+        AC-01 стори 10.1, D-10.1-5: `community_slug` обязателен в схеме, но
+        необязателен в API. `None` — берём `settings.default_community_slug`:
+        ADR-01 предписывает при **записи** брать слаг из конфига, а не от
+        клиента, поэтому fallback здесь не обходит правило, а реализует его.
+        Импорт локальный: модуль репозитория не должен тянуть конфиг при
+        импорте (unit-тесты без окружения).
+
+        DN-3 (CR 10.1): явно заданный `community_slug` сверяется с
+        `Settings.community_slugs` и с формой до `INSERT`. Отказ —
+        `UserCommunitySlugError` (`422` в роуте), а не `IntegrityError`/`500`.
+        """
+        # Импорт локальный: модуль репозитория не должен тянуть конфиг при
+        # импорте (unit-тесты без окружения) — форма из D-10.1-5 сохранена.
+        from app.core.config import settings
+
+        if community_slug is None:
+            # Fallback реализует ADR-01 (запись — из конфига), а не обходит его.
+            community_slug = settings.default_community_slug
+        else:
+            # DN-3: явно заданный слаг проверяется до INSERT. Fallback не
+            # проверяется: `Settings` валидирует `default_community_slug`
+            # на старте (`config.py:617`), второе чтение того же инварианта
+            # дало бы ложное чувство защиты без нового покрытия.
+            _validate_community_slug(community_slug, settings.community_slugs)
         user = User(
             provider=provider,
             provider_user_id=provider_user_id,
@@ -117,6 +189,7 @@ class UserRepository:
             role=role,
             gender=gender,
             status=status,
+            community_slug=community_slug,
         )
         self._session.add(user)
         await self._session.flush()

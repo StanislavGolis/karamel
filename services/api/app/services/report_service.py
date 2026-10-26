@@ -169,6 +169,7 @@ async def report_no_show(
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
     accused_uuid: uuid_lib.UUID,
+    viewer_community_slug: str,
     settings: AttendanceSettings,
     now: datetime | None = None,
 ) -> ReportCreated:
@@ -200,7 +201,13 @@ async def report_no_show(
     # существовании карточки). Код `card_not_found` совпадает намеренно.
     try:
         card, is_author = await _load_card(
-            session, card_uuid=card_uuid, viewer_id=viewer_id, settings=settings, now=moment
+            session,
+            card_uuid=card_uuid,
+            viewer_id=viewer_id,
+            # AC-05 стори 10.1: срез сообщества — колонка пользователя.
+            viewer_community_slug=viewer_community_slug,
+            settings=settings,
+            now=moment,
         )
     except AttendanceNotFoundError as error:
         raise ReportSubjectNotFoundError() from error

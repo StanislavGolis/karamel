@@ -130,8 +130,9 @@ async def test_history_query_uses_index_without_sort(session: AsyncSession) -> N
             await session.execute(
                 text(
                     "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
-                    "age_confirmed, consent_given_at) "
-                    "VALUES ('phone', :pu, :pu, 'user', 'female', 'active', true, now()) "
+                    "age_confirmed, consent_given_at, community_slug) "
+                    "VALUES ('phone', :pu, :pu, 'user', 'female', 'active', true, "
+                    "now(), 'tomsk') "
                     "RETURNING id"
                 ),
                 {"pu": author_phone},
@@ -154,10 +155,10 @@ async def test_history_query_uses_index_without_sort(session: AsyncSession) -> N
         text(
             """
             INSERT INTO users (provider, provider_user_id, phone, role, gender, status,
-                               age_confirmed, consent_given_at)
+                               age_confirmed, consent_given_at, community_slug)
             SELECT 'phone', '+7904' || lpad(g::text, 7, '0'),
                    '+7904' || lpad(g::text, 7, '0'), 'user',
-                   'female', 'active', true, now()
+                   'female', 'active', true, now(), 'tomsk'
               FROM generate_series(1, 100) AS g
             """
         )
@@ -291,9 +292,10 @@ def test_downgrade_guard_stops_above_threshold() -> None:
                         await connection.execute(
                             text(
                                 "INSERT INTO users (provider, provider_user_id, phone, role, "
-                                "gender, status, age_confirmed, consent_given_at) "
-                                "VALUES ('phone', :p, :p, 'user', 'female', 'active', true, now()) "
-                                "RETURNING id"
+                                "gender, status, age_confirmed, consent_given_at, "
+                                "community_slug) "
+                                "VALUES ('phone', :p, :p, 'user', 'female', 'active', "
+                                "true, now(), 'tomsk') RETURNING id"
                             ),
                             {"p": f"+7998{uuid_lib.uuid4().int % 10**7:07d}"},
                         )
@@ -330,9 +332,10 @@ def test_downgrade_guard_stops_above_threshold() -> None:
                 await connection.execute(
                     text(
                         "INSERT INTO users (provider, provider_user_id, phone, role, gender, "
-                        "status, age_confirmed, consent_given_at) "
+                        "status, age_confirmed, consent_given_at, community_slug) "
                         "SELECT 'phone', '+7996' || lpad(g::text, 7, '0'), "
-                        "'+7996' || lpad(g::text, 7, '0'), 'user', 'female', 'active', true, now() "
+                        "'+7996' || lpad(g::text, 7, '0'), 'user', 'female', 'active', "
+                        "true, now(), 'tomsk' "
                         "FROM generate_series(1, :n) AS g"
                     ),
                     {"n": threshold + 1},

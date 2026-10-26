@@ -135,9 +135,9 @@ def _seed_sanction() -> dict[str, Any]:
                     row = await connection.execute(
                         text(
                             "INSERT INTO users (uuid, provider, provider_user_id, phone, role, "
-                            "status, age_confirmed, consent_given_at) "
+                            "status, age_confirmed, consent_given_at, community_slug) "
                             "VALUES (gen_random_uuid(), 'phone', :p, :p, 'user', 'active', "
-                            "true, now()) RETURNING id"
+                            "true, now(), 'tomsk') RETURNING id"
                         ),
                         {"p": phone},
                     )
@@ -225,7 +225,7 @@ def test_down_revision_chain() -> None:
     assert _down_revision_of("0024") == "0023"
     # Стори 9.1: вершина — `0030` (уведомления и обращения). Проверяется «БД на вершине», а не номер
     # миграции 8.1: цепочка `0025 -> 0024 -> 0023` выше от вершины не зависит.
-    assert _current() == "0031"
+    assert _current() == "0033"
 
 
 # --- S02: guard непустой `sanctions` -----------------------------------------
@@ -252,10 +252,33 @@ def test_downgrade_blocked_by_sanction_rows() -> None:
         # ВСЮ транзакцию, поэтому вершина возвращается — остаётся `0027`
         # (8.3), а не `0025`. Это и есть доказательство атомарности: откат
         # ВСЕХ ревизий 0025..0029 отменён целиком, а не частично (0030 не затронут).
-        assert _current() == "0031"
+        assert _current() == "0033"
         assert _regclass("sanctions") == "sanctions"
     finally:
         _cleanup_sanctions(seeded)
+
+
+def _column_exists(table: str, column: str) -> bool:
+    """CR 10.1, P-11: есть ли колонка в схеме (после отката 0032)."""
+
+    async def _go() -> bool:
+        engine = create_async_engine(os.environ["DATABASE_URL"], poolclass=None)
+        try:
+            async with engine.connect() as conn:
+                row = (
+                    await conn.execute(
+                        text(
+                            "SELECT 1 FROM information_schema.columns "
+                            " WHERE table_name = :t AND column_name = :c"
+                        ),
+                        {"t": table, "c": column},
+                    )
+                ).first()
+                return row is not None
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_go())
 
 
 def _cleanup_sanctions(seeded: dict[str, Any]) -> None:
@@ -327,6 +350,11 @@ def test_downgrade_leaves_no_leftovers_then_upgrade() -> None:
     command.downgrade(_config(), "0024")
 
     assert _current() == "0024"
+    # CR 10.1, P-11, AC-03: `downgrade 0032` вернул колонки лайков. Стори 5.3
+    # требовала этого ассерта явно; до правки тест проходил через откат 0032,
+    # но не проверял, что тот действительно что-то восстановил.
+    assert _column_exists("users", "likes_used_today")
+    assert _column_exists("users", "likes_counted_on")
     assert _regclass("sanctions") is None
     assert _regclass("uq_attendance_id_card_id") is None
     assert _regclass("uq_reports_chat_id_reporter_id") is None
@@ -339,7 +367,7 @@ def test_downgrade_leaves_no_leftovers_then_upgrade() -> None:
     # `head` после 9.1 — `0030` (уведомления и обращения). Сравнение с вершиной,
     # а не с номером 8.1: тест проверяет, что `upgrade` вернул ВСЁ снятое,
     # включая `0026`…`0029`.
-    assert _current() == "0031"
+    assert _current() == "0033"
     assert _regclass("sanctions") == "sanctions"
     assert _regclass("uq_attendance_id_card_id") is not None
     assert _attendance_nullable() == "YES"

@@ -208,7 +208,35 @@ async def test_banned_user_gives_403_and_revokes_all(
 
 
 async def test_deletion_requested_gives_403(client: AsyncClient, session: AsyncSession) -> None:
-    """AC-05: запрошенное удаление блокирует обновление так же, как бан."""
+    """AC-06 стори 10.2: удаление блокирует обновление только ПОСЛЕ истечения окна.
+
+    D-10.2-1: прежняя версия ставила `now()` и защищала дефект — мгновенный бан
+    вместо 7-дневного окна с возможностью отмены (AC-01, AC-03). `now() - 8 days`
+    выходит за `DELETION_WINDOW_DAYS = 7`.
+    """
+    user = await _user(session)
+    raw = await _login(session, user)
+    await session.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(deletion_requested_at=datetime.now(UTC) - timedelta(days=8))
+    )
+    await session.flush()
+
+    response = await client.post("/api/v1/auth/refresh", cookies={REFRESH_COOKIE_NAME: raw})
+
+    assert response.status_code == 403
+    assert response.json() == {"code": "user_blocked"}
+
+
+async def test_deletion_requested_within_window_refreshes(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """AC-01 стори 10.2: активное окно обновление сессии НЕ блокирует.
+
+    D-10.2-1: иначе пользователь не смог бы отменить запрос (AC-03) —
+    refresh отдавал бы `403`, и клиент выкинул бы его на экран входа.
+    """
     user = await _user(session)
     raw = await _login(session, user)
     await session.execute(
@@ -218,8 +246,7 @@ async def test_deletion_requested_gives_403(client: AsyncClient, session: AsyncS
 
     response = await client.post("/api/v1/auth/refresh", cookies={REFRESH_COOKIE_NAME: raw})
 
-    assert response.status_code == 403
-    assert response.json() == {"code": "user_blocked"}
+    assert response.status_code == 200
 
 
 # --- AC-06: параллельные обновления ---

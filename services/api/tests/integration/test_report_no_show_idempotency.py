@@ -266,6 +266,7 @@ async def test_concurrent_reports_on_same_pair(factory: async_sessionmaker[Async
                     card_uuid=card_uuid,
                     viewer_id=author_id,
                     accused_uuid=accused_uuid,
+                    viewer_community_slug="tomsk",
                     settings=ReportSettings(),
                 )
             except ReportAlreadyExistsError:
@@ -321,6 +322,7 @@ async def test_concurrent_reports_different_pairs_both_created(
                 card_uuid=card_uuid,
                 viewer_id=author_id,
                 accused_uuid=accused_uuid,
+                viewer_community_slug="tomsk",
                 settings=ReportSettings(),
             )
             await attempt_session.commit()

@@ -75,8 +75,9 @@ SUPPORT_TICKETS_COLUMNS: dict[str, tuple[str, str]] = {
 }
 
 _INSERT_USER = (
-    "INSERT INTO users (provider, provider_user_id, phone, role, gender, status) "
-    "VALUES ('phone', :p, :p, 'user', 'female', 'active') RETURNING id"
+    "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
+    "community_slug) "
+    "VALUES ('phone', :p, :p, 'user', 'female', 'active', 'tomsk') RETURNING id"
 )
 
 _INSERT_NOTIFICATION = (

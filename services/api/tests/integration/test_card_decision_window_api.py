@@ -628,6 +628,7 @@ async def test_server_time_comes_from_injected_moment(session: AsyncSession) -> 
         session,
         card_uuid=uuid_lib.UUID(card_uuid),
         viewer_id=author.id,
+            viewer_community_slug="tomsk",
         settings=_CardSettings(),
         now=moment,
     )

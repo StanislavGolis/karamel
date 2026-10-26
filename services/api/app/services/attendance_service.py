@@ -133,6 +133,7 @@ async def _load_card(
     *,
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
+    viewer_community_slug: str,
     settings: AttendanceSettings,
     now: datetime,
 ) -> tuple[CardFeedItem, bool]:
@@ -151,7 +152,13 @@ async def _load_card(
     card: CardFeedItem | None = None
     try:
         card = await get_card(
-            session, card_uuid=card_uuid, viewer_id=viewer_id, settings=settings, now=now
+            session,
+            card_uuid=card_uuid,
+            viewer_id=viewer_id,
+            # AC-05 стори 10.1: срез сообщества — колонка пользователя.
+            viewer_community_slug=viewer_community_slug,
+            settings=settings,
+            now=now,
         )
     except CardNotFoundError:
         # Не падаем сразу: ниже выполняется запрос участия, как и на
@@ -221,6 +228,7 @@ async def get_attendance(
     *,
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
+    viewer_community_slug: str,
     settings: AttendanceSettings,
     now: datetime | None = None,
 ) -> AttendanceState:
@@ -235,7 +243,12 @@ async def get_attendance(
     """
     moment = now if now is not None else datetime.now(UTC)
     card, is_author = await _load_card(
-        session, card_uuid=card_uuid, viewer_id=viewer_id, settings=settings, now=moment
+        session,
+        card_uuid=card_uuid,
+        viewer_id=viewer_id,
+        viewer_community_slug=viewer_community_slug,
+        settings=settings,
+        now=moment,
     )
 
     repo = AttendanceRepository(session)
@@ -266,6 +279,7 @@ async def confirm_attendance(
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
     arrived: bool,
+    viewer_community_slug: str,
     settings: AttendanceSettings,
     now: datetime | None = None,
 ) -> AttendanceState:
@@ -281,7 +295,12 @@ async def confirm_attendance(
     """
     moment = now if now is not None else datetime.now(UTC)
     card, is_author = await _load_card(
-        session, card_uuid=card_uuid, viewer_id=viewer_id, settings=settings, now=moment
+        session,
+        card_uuid=card_uuid,
+        viewer_id=viewer_id,
+        viewer_community_slug=viewer_community_slug,
+        settings=settings,
+        now=moment,
     )
 
     author_id = card.card.author_id
