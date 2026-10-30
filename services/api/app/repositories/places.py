@@ -329,9 +329,7 @@ class PlaceRepository:
     # --- Доступность места для карточки (стори 4.1, Task 6.1–6.2; AC-04) ---
 
     @staticmethod
-    def build_availability_statement(
-        *, place_uuid: uuid_lib.UUID, city_slug: str
-    ) -> Select[Place]:
+    def build_availability_statement(*, place_uuid: uuid_lib.UUID, city_slug: str) -> Select[Place]:
         """AC-04 (FR98, ADR-12): место, на которое можно сослаться в карточке.
 
         Три условия обязательны вместе:
@@ -359,9 +357,7 @@ class PlaceRepository:
             Place.city_slug == city_slug,
         )
 
-    async def is_available_for_card(
-        self, *, place_uuid: uuid_lib.UUID, city_slug: str
-    ) -> bool:
+    async def is_available_for_card(self, *, place_uuid: uuid_lib.UUID, city_slug: str) -> bool:
         """AC-04: `EXISTS`-проверка доступности места перед созданием карточки.
 
         `SELECT EXISTS(...)`, а не выборка строки: сервису нужен только факт,
@@ -374,9 +370,7 @@ class PlaceRepository:
         `EventCardCreate` (Pydantic), а не здесь. Битый UUID туда не дойдёт,
         поэтому `DBAPIError` на этой ветке невозможен.
         """
-        statement = self.build_availability_statement(
-            place_uuid=place_uuid, city_slug=city_slug
-        )
+        statement = self.build_availability_statement(place_uuid=place_uuid, city_slug=city_slug)
         result = await self._session.execute(select(statement.exists()))
         available: bool = result.scalar_one()
         return available

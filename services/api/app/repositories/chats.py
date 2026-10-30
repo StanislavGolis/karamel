@@ -378,8 +378,7 @@ class ChatRepository:
             self.build_participants_statement(card_id=card_id, city_slug=city_slug)
         )
         return [
-            (int(row[0]), _as_uuid(row[1]), row[2], row[3], row[4], row[5])
-            for row in result.all()
+            (int(row[0]), _as_uuid(row[1]), row[2], row[3], row[4], row[5]) for row in result.all()
         ]
 
     @staticmethod

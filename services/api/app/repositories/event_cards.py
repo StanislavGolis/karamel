@@ -168,9 +168,7 @@ class EventCardRepository:
         прочитать строки, у `count(id)` — тот же план, но `id` уже NOT NULL,
         и `scalar_one()` даёт честный `int` для mypy-strict.
         """
-        statement = select(func.count(EventCard.id)).where(
-            EventCard.city_slug == city_slug
-        )
+        statement = select(func.count(EventCard.id)).where(EventCard.city_slug == city_slug)
         if status_filter != "all":
             statement = statement.where(EventCard.verification_status == status_filter)
         return statement
@@ -608,9 +606,7 @@ class EventCardRepository:
         return rows, total
 
     @staticmethod
-    def build_get_visible_statement(
-        *, card_uuid: uuid_lib.UUID, city_slug: str
-    ) -> Select[Any]:
+    def build_get_visible_statement(*, card_uuid: uuid_lib.UUID, city_slug: str) -> Select[Any]:
         """AC-02 (ADR-13, §7.2): карточка по `uuid` в срезе сообщества.
 
         `author_id`'а в условии НЕТ: карточка нужна и не автору (участник
@@ -698,9 +694,7 @@ class EventCardRepository:
         result = await self._session.execute(statement.execution_options(synchronize_session=False))
         return int(cast("CursorResult[Any]", result).rowcount or 0)
 
-    async def get_visible_card(
-        self, *, card_uuid: uuid_lib.UUID, city_slug: str
-    ) -> Any | None:
+    async def get_visible_card(self, *, card_uuid: uuid_lib.UUID, city_slug: str) -> Any | None:
         """AC-02: строка карточки с местом и автором или `None`.
 
         `populate_existing=True` обязателен (урок CR 2.1, патч 11): после

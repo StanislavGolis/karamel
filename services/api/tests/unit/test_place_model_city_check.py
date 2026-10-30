@@ -52,9 +52,7 @@ def test_model_check_repeats_pattern() -> None:
     """
     sql = _city_check_sql()
 
-    assert _CITY_SLUG_PATTERN in sql, (
-        f"CHECK модели не содержит шаблон {_CITY_SLUG_PATTERN}: {sql}"
-    )
+    assert _CITY_SLUG_PATTERN in sql, f"CHECK модели не содержит шаблон {_CITY_SLUG_PATTERN}: {sql}"
 
 
 def test_model_check_is_not_weakened() -> None:
@@ -67,6 +65,4 @@ def test_model_check_is_not_weakened() -> None:
     sql = _city_check_sql()
 
     for weakened in ("^.+$", "^[a-zA-Z0-9_-]{3,64}$", ".*"):
-        assert weakened not in sql, (
-            f"CHECK модели ослаблен до {weakened!r}: {sql}"
-        )
+        assert weakened not in sql, f"CHECK модели ослаблен до {weakened!r}: {sql}"

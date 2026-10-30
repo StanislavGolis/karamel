@@ -158,9 +158,7 @@ async def test_post_exactly_at_horizon_is_created(
     assert response.status_code == 201, response.text
 
 
-async def test_patch_beyond_horizon_returns_422(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_patch_beyond_horizon_returns_422(client: AsyncClient, session: AsyncSession) -> None:
     """AC-1, U-3: `PATCH` не обходит горизонт.
 
     Краснеет, если убрать гард из `update_card`: «создать нельзя, сдвинуть

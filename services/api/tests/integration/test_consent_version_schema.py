@@ -119,9 +119,7 @@ async def _delete_user_detached(user_id: int) -> None:
     engine = create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool)
     try:
         async with engine.begin() as connection:
-            await connection.execute(
-                text("DELETE FROM users WHERE id = :i"), {"i": user_id}
-            )
+            await connection.execute(text("DELETE FROM users WHERE id = :i"), {"i": user_id})
     finally:
         await engine.dispose()
 

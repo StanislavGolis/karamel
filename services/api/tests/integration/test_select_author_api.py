@@ -447,9 +447,7 @@ async def test_missing_request_gets_request_not_found(
     assert response.json()["code"] == "request_not_found"
 
 
-async def test_foreign_city_gets_card_not_found(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_foreign_city_gets_card_not_found(client: AsyncClient, session: AsyncSession) -> None:
     """AC-04 (ADR-13): карточка чужого сообщества неотличима от чужой.
 
     Краснеет, если убрать `city_slug` из `build_get_card_for_select_statement`:

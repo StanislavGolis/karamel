@@ -158,12 +158,8 @@ async def _drop_card(user_id: int, place_id: int) -> None:
                 text("DELETE FROM event_cards WHERE author_id = :author"),
                 {"author": user_id},
             )
-            await connection.execute(
-                text("DELETE FROM places WHERE id = :id"), {"id": place_id}
-            )
-            await connection.execute(
-                text("DELETE FROM users WHERE id = :id"), {"id": user_id}
-            )
+            await connection.execute(text("DELETE FROM places WHERE id = :id"), {"id": place_id})
+            await connection.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
     finally:
         await engine.dispose()
 
@@ -245,15 +241,11 @@ async def test_half_open_age_range_is_allowed() -> None:
     user_id, place_id, card_id = await _make_card()
     try:
         await _set_bounds(card_id, age_min=30, age_max=None)
-        rows = await _fetch(
-            "SELECT age_min, age_max FROM event_cards WHERE id = :id", id=card_id
-        )
+        rows = await _fetch("SELECT age_min, age_max FROM event_cards WHERE id = :id", id=card_id)
         assert rows == [(30, None)], f"полуоткрытая пара должна сохраниться, получено {rows}"
         # Симметричный случай: верхняя граница без нижней.
         await _set_bounds(card_id, age_min=None, age_max=35)
-        rows = await _fetch(
-            "SELECT age_min, age_max FROM event_cards WHERE id = :id", id=card_id
-        )
+        rows = await _fetch("SELECT age_min, age_max FROM event_cards WHERE id = :id", id=card_id)
         assert rows == [(None, 35)], f"пара NULL/35 должна сохраниться, получено {rows}"
     finally:
         await _drop_card(user_id, place_id)
@@ -265,9 +257,7 @@ async def test_equal_age_bounds_are_allowed() -> None:
     user_id, place_id, card_id = await _make_card()
     try:
         await _set_bounds(card_id, age_min=30, age_max=30)
-        rows = await _fetch(
-            "SELECT age_min, age_max FROM event_cards WHERE id = :id", id=card_id
-        )
+        rows = await _fetch("SELECT age_min, age_max FROM event_cards WHERE id = :id", id=card_id)
         assert rows == [(30, 30)], f"равные границы должны сохраниться, получено {rows}"
     finally:
         await _drop_card(user_id, place_id)
@@ -287,9 +277,7 @@ async def test_gender_filter_accepts_null_and_known_values() -> None:
     try:
         for value in (None, "female", "male"):
             await _set_bounds(card_id, gender_filter=value)
-            rows = await _fetch(
-                "SELECT gender_filter FROM event_cards WHERE id = :id", id=card_id
-            )
+            rows = await _fetch("SELECT gender_filter FROM event_cards WHERE id = :id", id=card_id)
             assert rows == [(value,)], f"значение {value!r} должно сохраниться, получено {rows}"
     finally:
         await _drop_card(user_id, place_id)

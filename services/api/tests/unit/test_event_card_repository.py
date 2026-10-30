@@ -182,6 +182,4 @@ async def test_count_overdue_windows_predicate_matches_adr14() -> None:
     params = session.statements[0].compile().params  # type: ignore[attr-defined]
     bound = [v for v in params.values() if isinstance(v, datetime)]
     assert bound, f"в запросе нет привязанного времени: {params}"
-    assert NOW - timedelta(minutes=5) in bound, (
-        f"в запросе не запас ADR-14 (NOW - 5 мин): {bound}"
-    )
+    assert NOW - timedelta(minutes=5) in bound, f"в запросе не запас ADR-14 (NOW - 5 мин): {bound}"

@@ -150,9 +150,7 @@ async def test_list_returns_only_active_places_of_own_city(
     first = await _insert_place(session, name="Кафе „Прага“", minutes_offset=1)
     second = await _insert_place(session, name="Кино „Победа“", category="cinema", minutes_offset=2)
     hidden = await _insert_place(session, name="Скрытое", is_active=False, minutes_offset=3)
-    foreign = await _insert_place(
-        session, name="Чужое", city_slug="kemerovo", minutes_offset=4
-    )
+    foreign = await _insert_place(session, name="Чужое", city_slug="kemerovo", minutes_offset=4)
 
     response = await client.get("/api/v1/places", cookies=_cookies(token))
 

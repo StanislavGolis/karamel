@@ -104,9 +104,7 @@ def test_capacity_one_with_company_is_allowed() -> None:
     Краснеет, если появится валидатор «`capacity=1` → `date`»: автор
     потерял бы право собрать компанию из одного собеседника (U-6).
     """
-    card = EventCardCreate(
-        **_payload(capacity=1, kind="company", decision_window_minutes=60)
-    )
+    card = EventCardCreate(**_payload(capacity=1, kind="company", decision_window_minutes=60))
     assert card.capacity == 1
     assert str(card.kind) == "company"
 

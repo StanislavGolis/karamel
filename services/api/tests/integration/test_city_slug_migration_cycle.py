@@ -201,9 +201,7 @@ async def test_downgrade_restores_community_names() -> None:
             assert (table, "community_slug") in found, (
                 f"{table}.community_slug не вернулся после downgrade"
             )
-            assert (table, "city_slug") not in found, (
-                f"{table}.city_slug остался после downgrade"
-            )
+            assert (table, "city_slug") not in found, f"{table}.city_slug остался после downgrade"
 
         # Точные имена: `0032.downgrade()` дропает `ck_users_community_slug`.
         constraints = await _fetch(
@@ -397,8 +395,7 @@ async def test_upgrade_survives_pg16_without_named_not_null() -> None:
         found = {(str(t), str(c), str(n)) for t, c, n in rows}
         for table in _TABLES:
             assert (table, "city_slug", "NO") in found, (
-                f"{table}.city_slug потерял NOT NULL после upgrade без "
-                "именованного NOT NULL"
+                f"{table}.city_slug потерял NOT NULL после upgrade без именованного NOT NULL"
             )
             assert (table, "community_slug", "NO") not in found
 
@@ -412,9 +409,7 @@ async def test_upgrade_survives_pg16_without_named_not_null() -> None:
         _run_alembic("upgrade", "head")
         # Возврат канонических имён PG 17+ (на PG 16 — no-op).
         for table, _old_name, new_name in migration._NOT_NULL_RENAMES:
-            await _execute(
-                _pg16_restore_sql(table, f"{_SIM_PREFIX}{table}_slug", new_name)
-            )
+            await _execute(_pg16_restore_sql(table, f"{_SIM_PREFIX}{table}_slug", new_name))
 
 
 @pytest.mark.asyncio

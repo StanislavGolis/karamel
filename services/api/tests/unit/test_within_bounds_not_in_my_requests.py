@@ -34,8 +34,7 @@ def test_my_request_item_has_no_within_bounds() -> None:
     """AC-4: в схеме своих заявок поля нет — ни под каким именем."""
     fields = set(MyRequestItem.model_fields)
     assert "within_bounds" not in fields, (
-        "AC-4 нарушен: заявитель увидит, что его отсеяли по рамкам. "
-        f"Поля схемы: {sorted(fields)}"
+        f"AC-4 нарушен: заявитель увидит, что его отсеяли по рамкам. Поля схемы: {sorted(fields)}"
     )
     # Подстраховка от переименования: поле с тем же смыслом под другим именем
     # (`is_within_bounds`, `audience_ok`) тоже нарушило бы AC-4.

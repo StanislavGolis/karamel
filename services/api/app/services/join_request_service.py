@@ -338,9 +338,7 @@ async def submit_join_request(
     await UserRepository(session).lock_for_update(applicant_id)
 
     # 2. AC-07: чтение с срезом сообщества. FK/идентификаторы наружу не идут.
-    card: EventCard | None = await repo.get_card_for_request(
-        card_uuid, settings.default_city_slug
-    )
+    card: EventCard | None = await repo.get_card_for_request(card_uuid, settings.default_city_slug)
     # 3. AC-07: нет карточки == чужое сообщество (ADR-13, `404` с тем же телом).
     if card is None:
         raise JoinRequestCardNotFoundError()
@@ -1120,9 +1118,7 @@ async def list_card_requests(
             applicant_uuid=row.applicant_uuid,
             applicant_name=row.applicant_name,
             # Стори 12.2, AC-3: возраст вычисляется из `birth_date`.
-            applicant_age=compute_age(
-                row.applicant_birth_date, row.applicant_age, today_or_now()
-            ),
+            applicant_age=compute_age(row.applicant_birth_date, row.applicant_age, today_or_now()),
             photo_url=signed.get(int(row.applicant_user_id)),
             # AC-3 стори 12.6 (FR119): значение пришло из SQL-проекции —
             # того же предиката, что фильтрует автовыбор (AC-5a). `None` —

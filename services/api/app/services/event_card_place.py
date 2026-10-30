@@ -87,8 +87,6 @@ async def ensure_place_available(
     из ответа `GET /places` (клиент выбирает место из списка — FR98).
     """
     repo = repository if repository is not None else PlaceRepository(session)
-    available = await repo.is_available_for_card(
-        place_uuid=place_uuid, city_slug=city_slug
-    )
+    available = await repo.is_available_for_card(place_uuid=place_uuid, city_slug=city_slug)
     if not available:
         raise PlaceNotAvailableError(place_uuid)

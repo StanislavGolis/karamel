@@ -82,9 +82,7 @@ _KIND_CHECK = "kind IN ('date', 'company')"
 #: исполнимой сама по себе (alembic зовёт её в отдельном процессе), а импорт
 #: `app.models.enums` связал бы ревизию с текущим кодом приложения — при
 #: следующем рефакторинге откат старой ревизии сломался бы.
-_ACTIVITY_CHECK = (
-    "activity IN ('coffee', 'walk', 'bar', 'cinema', 'boardgames', 'sport', 'other')"
-)
+_ACTIVITY_CHECK = "activity IN ('coffee', 'walk', 'bar', 'cinema', 'boardgames', 'sport', 'other')"
 
 #: CR 12.4 H-1 (долг `W-12.4-h`): ценности, которые `upgrade()` восстанавливает
 #: бэкфиллом. Откат сохраняет смысл только для строк, уже равных этой паре:
@@ -158,14 +156,18 @@ def downgrade() -> None:
     if context.as_sql:
         raise RuntimeError(_OFFLINE_REFUSAL)
 
-    rows_at_risk = op.get_bind().execute(
-        sa.text(
-            "SELECT count(*) FROM event_cards "
-            "WHERE kind IS DISTINCT FROM :kind "
-            "   OR activity IS DISTINCT FROM :activity"
-        ),
-        {"kind": BACKFILL_KIND, "activity": BACKFILL_ACTIVITY},
-    ).scalar_one()
+    rows_at_risk = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT count(*) FROM event_cards "
+                "WHERE kind IS DISTINCT FROM :kind "
+                "   OR activity IS DISTINCT FROM :activity"
+            ),
+            {"kind": BACKFILL_KIND, "activity": BACKFILL_ACTIVITY},
+        )
+        .scalar_one()
+    )
 
     if rows_at_risk:
         if os.environ.get(ALLOW_MEANING_LOSS_ENV) != "1":
@@ -189,8 +191,6 @@ def downgrade() -> None:
 
     # AC-8: порядок важен — CHECK ссылаются на колонки, поэтому снимаются первыми.
     op.drop_constraint(op.f(f"ck_event_cards_{KIND_CONSTRAINT}"), "event_cards", type_="check")
-    op.drop_constraint(
-        op.f(f"ck_event_cards_{ACTIVITY_CONSTRAINT}"), "event_cards", type_="check"
-    )
+    op.drop_constraint(op.f(f"ck_event_cards_{ACTIVITY_CONSTRAINT}"), "event_cards", type_="check")
     op.drop_column("event_cards", "activity")
     op.drop_column("event_cards", "kind")

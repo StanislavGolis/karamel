@@ -36,9 +36,7 @@ class _StubRepository:
         self._available = available
         self.calls: list[dict[str, Any]] = []
 
-    async def is_available_for_card(
-        self, *, place_uuid: uuid_lib.UUID, city_slug: str
-    ) -> bool:
+    async def is_available_for_card(self, *, place_uuid: uuid_lib.UUID, city_slug: str) -> bool:
         self.calls.append({"place_uuid": place_uuid, "city_slug": city_slug})
         return self._available
 

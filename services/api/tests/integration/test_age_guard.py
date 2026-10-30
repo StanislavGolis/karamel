@@ -61,6 +61,7 @@ async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
         yield http_client
     app.dependency_overrides.pop(get_session, None)
 
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
@@ -109,9 +110,7 @@ async def test_underage_with_birth_date_gets_403(
     user, token = await _new_user(session)
     await _insert_profile_with_birth_date(session, user.id, _birth_date_years_ago(17))
 
-    response = await client.get(
-        "/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get("/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 403
     assert response.json()["code"] == "underage"
@@ -127,24 +126,18 @@ async def test_eighteen_today_is_allowed(client: AsyncClient, session: AsyncSess
     user, token = await _new_user(session)
     await _insert_profile_with_birth_date(session, user.id, _birth_date_years_ago(18))
 
-    response = await client.get(
-        "/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get("/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 200
 
 
-async def test_eighteen_tomorrow_is_denied(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_eighteen_tomorrow_is_denied(client: AsyncClient, session: AsyncSession) -> None:
     """Обратная граница: до дня рождения остался день — 17 полных лет."""
     user, token = await _new_user(session)
     tomorrow_birthday = _birth_date_years_ago(18) + timedelta(days=1)
     await _insert_profile_with_birth_date(session, user.id, tomorrow_birthday)
 
-    response = await client.get(
-        "/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get("/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 403
     assert response.json()["code"] == "underage"
@@ -168,17 +161,13 @@ async def test_grandfathering_legacy_age_is_allowed(
     )
     await session.commit()
 
-    response = await client.get(
-        "/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get("/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 200
     assert response.json()["age"] == 32
 
 
-async def test_birth_date_wins_over_legacy_age(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_birth_date_wins_over_legacy_age(client: AsyncClient, session: AsyncSession) -> None:
     """AC-5: при наличии обоих источников решает `birth_date`.
 
     Устаревшее число не должно «разрешать» доступ: иначе достаточно
@@ -194,17 +183,13 @@ async def test_birth_date_wins_over_legacy_age(
     )
     await session.commit()
 
-    response = await client.get(
-        "/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get("/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 403
     assert response.json()["code"] == "underage"
 
 
-async def test_no_profile_keeps_consent_flow(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_no_profile_keeps_consent_flow(client: AsyncClient, session: AsyncSession) -> None:
     """AC-5: анкеты нет — гард не отказывает, онбординг продолжается.
 
     Требовать анкету до её создания значило бы запереть пользователя:
@@ -212,9 +197,7 @@ async def test_no_profile_keeps_consent_flow(
     """
     user, token = await _new_user(session)
 
-    response = await client.get(
-        "/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get("/api/v1/profiles/me", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 404
     assert response.json()["code"] == "profile_not_found"

@@ -166,6 +166,12 @@ class CardSettings(Protocol):
     # В протоколе по тому же приёму: unit-тест лимита подставляет `1`/`2`
     # и не читает `.env` (иначе тест зависел бы от локального файла).
     card_active_limit: int
+    # Стори 12.7 (AC-5, D-12.7-4, NFR23): общий TTL подписи на фото.
+    # Поле есть в `Settings` (`s3_signed_url_ttl`, config.py:379); в протоколе
+    # оно отсутствовало, и mypy считал `_author_photo_ttl` возвращающей `Any`.
+    # Объявлено здесь, а не прочитано через `Settings` напрямую: unit-тест
+    # подставляет число без чтения `.env` — тот же приём, что выше.
+    s3_signed_url_ttl: int
 
 
 class CardNotFoundError(Exception):
@@ -439,9 +445,7 @@ async def create_card(
     # AC-02, AC-03: место резолвится ПЕРВЫМ — до проверки времени.
     # Единственное обращение к `places`: даёт `place_id` для FK и бросает
     # `PlaceNotAvailableError` тем же билдером предиката, что гард 4.1.
-    place_id = await _resolve_place_id(
-        session, place_uuid=payload.place_uuid, city_slug=city_slug
-    )
+    place_id = await _resolve_place_id(session, place_uuid=payload.place_uuid, city_slug=city_slug)
 
     # AC-03: сравнение строго с серверным моментом; `<=` тоже отказ —
     # «сейчас» уже не «будущее».
@@ -725,11 +729,7 @@ async def update_card(
     # запросом. Перевёрнутая пара относительно ТЕКУЩЕГО значения проверяется
     # здесь, на смеси payload и строки: иначе `CHECK` дал бы `IntegrityError`
     # → `500` (класс дефекта 12.5). Тот же код ответа, что у схемы.
-    if (
-        card.age_min is not None
-        and card.age_max is not None
-        and card.age_min > card.age_max
-    ):
+    if card.age_min is not None and card.age_max is not None and card.age_min > card.age_max:
         raise CardAgeRangeInvalidError()
 
     # AC-04, D-4.2-3: у ЧЕРНОВИКА `expires_at` пересчитывается всегда — меняется
@@ -1479,11 +1479,7 @@ async def get_card_author_profile(
 
     # AC-2, 12.3: возраст ТОЛЬКО вычисленный. `birth_date` приоритетнее
     # legacy-`age`: у новых учёток колонка `age` — `NULL`.
-    age = (
-        None
-        if profile is None
-        else compute_age(profile.birth_date, profile.age, today_or_now())
-    )
+    age = None if profile is None else compute_age(profile.birth_date, profile.age, today_or_now())
 
     # AC-5: TTL считается ОДИН раз и уходит и в подпись, и в ответ.
     ttl = _author_photo_ttl(starts_at=item.card.starts_at, now=moment, settings=settings)
@@ -1495,9 +1491,7 @@ async def get_card_author_profile(
         except (MediaStorageError, MediaUnavailableError):
             # Приём `_sign_photos` (5а.4): сбой хранилища не валит экран.
             # URL не логируется никогда (D-11) — только факт сбоя.
-            logger.warning(
-                "card_author_profile.photo.sign_failed", user_id=item.card.author_id
-            )
+            logger.warning("card_author_profile.photo.sign_failed", user_id=item.card.author_id)
 
     return EventCardAuthorProfile(
         uuid=item.author_uuid,

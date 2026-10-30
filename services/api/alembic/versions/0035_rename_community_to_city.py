@@ -77,9 +77,7 @@ _INDEX_RENAMES = (
 )
 
 #: `uq_places_community_name` — ограничение (`contype = 'u'`), не индекс.
-_UNIQUE_CONSTRAINT_RENAMES = (
-    ("uq_places_community_name", "uq_places_city_name"),
-)
+_UNIQUE_CONSTRAINT_RENAMES = (("uq_places_community_name", "uq_places_city_name"),)
 
 #: CHECK-ограничения. Имя без префикса: naming convention даёт `ck_<table>_<name>`.
 _CHECK_RENAMES = (
@@ -148,7 +146,6 @@ def _rename_not_null_if_exists(table: str, old: str, new: str) -> None:
         f"    END IF;\n"
         f"END $$;"
     )
-
 
 
 def upgrade() -> None:

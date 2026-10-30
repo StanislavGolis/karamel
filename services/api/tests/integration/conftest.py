@@ -318,9 +318,7 @@ def clean_database(migrated_database: None) -> Generator[None]:
 DDL_SKIP_REASON = "DDL меняет общую схему и несовместим с xdist; гоните `pytest -m ddl` без `-n`"
 
 
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Пропускает DDL-тесты, если прогон идёт под xdist (AC-4, W-11.4-d)."""
     if not os.environ.get("PYTEST_XDIST_WORKER"):
         return

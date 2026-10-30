@@ -289,6 +289,7 @@ async def _http_metrics(
     знает (project-context §6), поэтому проверка идёт через клиент, а не
     через сервис.
     """
+
     async def _override() -> Any:
         yield session
 
@@ -338,9 +339,7 @@ async def test_request_before_boundary_is_rejected(session: AsyncSession) -> Non
     period_to = moment - timedelta(days=1)
 
     # Task 3.4: отказ ДО прогона ретенции — замок на контракте, не на данных.
-    before_purge = await _http_metrics(
-        session, token, period_from=period_from, period_to=period_to
-    )
+    before_purge = await _http_metrics(session, token, period_from=period_from, period_to=period_to)
     assert before_purge.status_code == 422, before_purge.text
     assert before_purge.json() == {"code": "period_too_old"}
 
@@ -348,9 +347,7 @@ async def test_request_before_boundary_is_rejected(session: AsyncSession) -> Non
     assert result.deleted == 1
 
     # Task 3.3: тот же запрос ПОСЛЕ прогона — тот же отказ, а не `200`.
-    after_purge = await _http_metrics(
-        session, token, period_from=period_from, period_to=period_to
-    )
+    after_purge = await _http_metrics(session, token, period_from=period_from, period_to=period_to)
     assert after_purge.status_code == 422, after_purge.text
     assert after_purge.json() == {"code": "period_too_old"}
 

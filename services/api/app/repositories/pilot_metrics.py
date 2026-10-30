@@ -142,9 +142,7 @@ class PilotMetricsRepository:
             """
         )
         row = (
-            await self._session.execute(
-                statement, self._params(city_slug, period_from, period_to)
-            )
+            await self._session.execute(statement, self._params(city_slug, period_from, period_to))
         ).one()
         return int(row.numerator), int(row.denominator or 0)
 
@@ -169,9 +167,7 @@ class PilotMetricsRepository:
             """
         )
         row = (
-            await self._session.execute(
-                statement, self._params(city_slug, period_from, period_to)
-            )
+            await self._session.execute(statement, self._params(city_slug, period_from, period_to))
         ).one()
         return int(row.numerator), int(row.denominator or 0)
 
@@ -253,8 +249,6 @@ class PilotMetricsRepository:
             """
         )
         row = (
-            await self._session.execute(
-                statement, self._params(city_slug, period_from, period_to)
-            )
+            await self._session.execute(statement, self._params(city_slug, period_from, period_to))
         ).one()
         return int(row.numerator), int(row.denominator or 0)

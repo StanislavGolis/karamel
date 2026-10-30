@@ -205,9 +205,7 @@ class RedactingSensitiveProcessor:
     def __call__(
         self, _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
     ) -> MutableMapping[str, Any]:
-        return cast(
-            MutableMapping[str, Any], self._redact(event_dict, depth=0)
-        )
+        return cast(MutableMapping[str, Any], self._redact(event_dict, depth=0))
 
     @classmethod
     def _redact(cls, value: Any, *, depth: int) -> Any:

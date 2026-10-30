@@ -105,9 +105,7 @@ def test_count_has_no_cursor_and_same_filters() -> None:
     страницы к странице, и клиент не смог бы показать счётчик.
     """
     sql = _sql(
-        JoinRequestRepository.build_my_requests_count_statement(
-            applicant_id=7, city_slug="tomsk"
-        )
+        JoinRequestRepository.build_my_requests_count_statement(applicant_id=7, city_slug="tomsk")
     )
 
     assert "count(join_requests.id)" in sql

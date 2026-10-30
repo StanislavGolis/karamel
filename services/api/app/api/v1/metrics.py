@@ -107,9 +107,7 @@ def _months_ago(moment: datetime, months: int) -> datetime:
     month = month_index % 12 + 1
     # Последний день целевого месяца: первый день следующего минус сутки.
     # Для декабря «следующий месяц» — январь, и вычитать нечего: 31 известен.
-    last_day = (
-        31 if month == 12 else (datetime(year, month + 1, 1) - datetime(year, month, 1)).days
-    )
+    last_day = 31 if month == 12 else (datetime(year, month + 1, 1) - datetime(year, month, 1)).days
     day = min(moment.day, last_day)
     return moment.replace(year=year, month=month, day=day)
 

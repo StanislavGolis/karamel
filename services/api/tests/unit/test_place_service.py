@@ -119,9 +119,7 @@ class _FakeRepository:
         type(self).checked.append((city_slug, name))
         return type(self).found_place
 
-    async def exists_in_city_excluding(
-        self, city_slug: str, name: str, exclude_uuid: Any
-    ) -> Any:
+    async def exists_in_city_excluding(self, city_slug: str, name: str, exclude_uuid: Any) -> Any:
         """Task 3.3 (AC-05): поиск дубля, не считая самого места."""
         type(self).excluding_calls.append((city_slug, name, exclude_uuid))
         return type(self).excluding_result
@@ -971,9 +969,7 @@ async def test_list_rejects_slug_outside_config() -> None:
     """
     from app.services.place_service import PlaceUnknownCommunityError, list_places
 
-    session, settings = _session_with_settings(
-        city_slugs=("tomsk",), default_city_slug="kemerovo"
-    )
+    session, settings = _session_with_settings(city_slugs=("tomsk",), default_city_slug="kemerovo")
 
     with pytest.raises(PlaceUnknownCommunityError):
         await list_places(session, settings=settings)

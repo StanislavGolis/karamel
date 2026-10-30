@@ -311,9 +311,7 @@ async def test_stale_backup_sends_alert_with_own_dedup_key(
     assert "backup" in calls[0]["text"] and "stale" in calls[0]["text"]
 
 
-async def test_ok_backup_does_not_alert(
-    configured: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_ok_backup_does_not_alert(configured: None, monkeypatch: pytest.MonkeyPatch) -> None:
     """AC-4: свежий бэкап → тишина. Без этой стороны алерт слался бы всегда."""
     redis = _FakeRedis()
     calls: list[dict[str, Any]] = []

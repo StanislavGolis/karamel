@@ -89,8 +89,7 @@ def test_city_slugs_rejects_empty() -> None:
         _settings(city_slugs=",")
 
     assert "не может быть пустым" in str(exc.value), (
-        "пустой список отвергнут не своим гардом: "
-        f"{exc.value}"
+        f"пустой список отвергнут не своим гардом: {exc.value}"
     )
 
 

@@ -102,9 +102,7 @@ def test_fixed_code_with_combat_provider_fails(monkeypatch: pytest.MonkeyPatch) 
         "１２３４５６",  # полноширинные юникодные цифры: isdigit() истинно, код не совпадёт
     ],
 )
-def test_fixed_code_wrong_format_fails(
-    monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
+def test_fixed_code_wrong_format_fails(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     """Код не из ровно `sms_code_length` ASCII-цифр роняет старт.
 
     Краснеет, если проверять только `isdigit()` и длину: полноширинная запись

@@ -138,9 +138,7 @@ async def _insert_card(
 
 
 async def _join(client: AsyncClient, token: str, card_uuid: str) -> Any:
-    return await client.post(
-        f"/api/v1/cards/{card_uuid}/join", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    return await client.post(f"/api/v1/cards/{card_uuid}/join", cookies={ACCESS_COOKIE_NAME: token})
 
 
 async def _card_state(session: AsyncSession, card_id: int) -> tuple[int, str]:

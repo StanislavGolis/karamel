@@ -31,7 +31,7 @@ PG_BACKUP = REPO_ROOT / "scripts" / "backup" / "pg-backup.sh"
 #: Поддельный `docker`. Сторона `postgres` отдаёт 2000 байт «дампа»,
 #: сторона `api` считает прочитанное и печатает обе величины так же, как
 #: настоящий блок загрузки. `FAKE_DELTA` имитирует расхождение `ContentLength`.
-_FAKE_DOCKER = '''#!/bin/bash
+_FAKE_DOCKER = """#!/bin/bash
 if [ "$4" = "postgres" ]; then
   printf '%*s' 2000 '' | tr ' ' 'D'
 elif [ "$4" = "api" ]; then
@@ -39,7 +39,7 @@ elif [ "$4" = "api" ]; then
   n=${#payload}
   echo "s3_content_length=$((n+${FAKE_DELTA:-0})) bytes_uploaded=$n"
 fi
-'''
+"""
 
 
 def _run_script(
@@ -78,9 +78,7 @@ def _seed(backups: Path, ages: range) -> None:
     for age in ages:
         handle = backups / f"karamel-d{age}.dump"
         handle.write_bytes(b"x")
-        stamp = subprocess.run(
-            ["touch", "-d", f"{age} days ago", str(handle)], check=False
-        )
+        stamp = subprocess.run(["touch", "-d", f"{age} days ago", str(handle)], check=False)
         assert stamp.returncode == 0
 
 

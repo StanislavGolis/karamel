@@ -176,9 +176,7 @@ async def _request(
 
 async def _card_state(session: AsyncSession, card_id: int) -> tuple[int, str, Any, Any]:
     row = await session.execute(
-        text(
-            "SELECT filled_count, status, chat_uuid, expires_at FROM event_cards WHERE id = :id"
-        ),
+        text("SELECT filled_count, status, chat_uuid, expires_at FROM event_cards WHERE id = :id"),
         {"id": card_id},
     )
     filled, status, chat_uuid, expires_at = row.one()
@@ -206,9 +204,7 @@ async def test_guard_14_only_outsider_pending_keeps_card_published(
     async with factory() as seed:
         author_id = await _new_user(seed)
         place_id = await _place(seed)
-        card_uuid, card_id = await _expired_card(
-            seed, author_id=author_id, place_id=place_id
-        )
+        card_uuid, card_id = await _expired_card(seed, author_id=author_id, place_id=place_id)
 
         young_id = await _new_user(seed)
         await _profile(seed, user_id=young_id, age=22)
@@ -230,8 +226,7 @@ async def test_guard_14_only_outsider_pending_keeps_card_published(
     assert filled == 0, f"AC-5: `filled_count` обязан остаться 0, получено {filled}"
     assert chat_uuid is None, f"AC-5: чат не создаётся, получено {chat_uuid}"
     assert statuses[young_request_id] == "pending", (
-        f"AC-5: заявка вне рамок не должна менять статус, получено "
-        f"{statuses[young_request_id]}"
+        f"AC-5: заявка вне рамок не должна менять статус, получено {statuses[young_request_id]}"
     )
     selected = [req for req, value in statuses.items() if value == "selected"]
     assert selected == [], f"AC-5: `count(selected)` обязан быть 0, получено {selected}"
@@ -253,9 +248,7 @@ async def test_paired_insider_is_selected_over_earlier_outsider(
     async with factory() as seed:
         author_id = await _new_user(seed)
         place_id = await _place(seed)
-        card_uuid, card_id = await _expired_card(
-            seed, author_id=author_id, place_id=place_id
-        )
+        card_uuid, card_id = await _expired_card(seed, author_id=author_id, place_id=place_id)
 
         young_id = await _new_user(seed)
         await _profile(seed, user_id=young_id, age=22)
@@ -285,8 +278,7 @@ async def test_paired_insider_is_selected_over_earlier_outsider(
         f"AC-5: выбран должен быть 35-летний, получено {statuses[adult_request_id]}"
     )
     assert statuses[young_request_id] == "not_selected", (
-        f"AC-5: 22-летний обязан получить not_selected, получено "
-        f"{statuses[young_request_id]}"
+        f"AC-5: 22-летний обязан получить not_selected, получено {statuses[young_request_id]}"
     )
 
 
@@ -304,9 +296,7 @@ async def test_no_requests_at_all_still_closes_card(
     async with factory() as seed:
         author_id = await _new_user(seed)
         place_id = await _place(seed)
-        card_uuid, card_id = await _expired_card(
-            seed, author_id=author_id, place_id=place_id
-        )
+        card_uuid, card_id = await _expired_card(seed, author_id=author_id, place_id=place_id)
         await seed.commit()
 
     counters = await run_decisions(factory, now=moment + timedelta(minutes=1), limit=200)

@@ -50,7 +50,9 @@ pytestmark = [
 
 
 @asynccontextmanager
-async def real_commit_client(factory: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncClient]:
+async def real_commit_client(
+    factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncClient]:
     """Клиент, у которого КАЖДЫЙ запрос получает собственную настоящую сессию.
 
     Отличие от `build_client` принципиальное: там `commit` подменён на `flush`.
@@ -122,8 +124,7 @@ class CommittedWorld:
         async with self.factory() as reader:
             result = await reader.execute(
                 text(
-                    "SELECT action, moderator_uuid::text FROM access_logs "
-                    " WHERE subject_uuid = :s"
+                    "SELECT action, moderator_uuid::text FROM access_logs  WHERE subject_uuid = :s"
                 ),
                 {"s": subject_uuid},
             )

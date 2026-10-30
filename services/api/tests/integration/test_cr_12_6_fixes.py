@@ -36,6 +36,7 @@ pytestmark = [
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
+
 class _CardSettings:
     """Минимум настроек `CardSettings` без чтения `.env` (Protocol не инстанцируется)."""
 
@@ -589,9 +590,7 @@ async def test_age_min_boundary_is_inclusive(
     assert flags[on_boundary_request] is True, (
         f"H-5: ровно 30 при `age_min=30` проходит, получено {flags}"
     )
-    assert flags[below_request] is False, (
-        f"H-5: 29 при `age_min=30` не проходит, получено {flags}"
-    )
+    assert flags[below_request] is False, f"H-5: 29 при `age_min=30` не проходит, получено {flags}"
 
 
 async def test_age_max_boundary_is_inclusive(
@@ -620,9 +619,7 @@ async def test_age_max_boundary_is_inclusive(
     assert flags[on_boundary_request] is True, (
         f"H-5: ровно 30 при `age_max=30` проходит, получено {flags}"
     )
-    assert flags[above_request] is False, (
-        f"H-5: 31 при `age_max=30` не проходит, получено {flags}"
-    )
+    assert flags[above_request] is False, f"H-5: 31 при `age_max=30` не проходит, получено {flags}"
 
 
 # ——— маркер самоисцеляется: снятие рамок и новая заявка ———

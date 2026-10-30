@@ -284,10 +284,7 @@ async def test_cancel_publishes_system_message_to_chat_channel(
     rows = await _system_rows(session, chat_uuid=chat_uuid)
     assert len(rows) == 1
     stored_uuid = await session.execute(
-        text(
-            "SELECT m.uuid FROM messages m JOIN chats c ON c.id = m.chat_id "
-            "WHERE c.uuid = :u"
-        ),
+        text("SELECT m.uuid FROM messages m JOIN chats c ON c.id = m.chat_id WHERE c.uuid = :u"),
         {"u": chat_uuid},
     )
     assert event["message_uuid"] == str(stored_uuid.scalar_one()), (

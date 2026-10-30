@@ -110,9 +110,7 @@ def _auth(token: str) -> dict[str, str]:
     return {"cookie": f"{ACCESS_COOKIE_NAME}={token}"}
 
 
-async def _new_user(
-    session: AsyncSession, *, city_slug: str | None = None
-) -> tuple[User, str]:
+async def _new_user(session: AsyncSession, *, city_slug: str | None = None) -> tuple[User, str]:
     phone = f"+7908{uuid_lib.uuid4().int % 10**7:07d}"
     user = await UserRepository(session).create(
         provider="phone",
@@ -267,9 +265,7 @@ async def test_published_card_shows_author_profile(
     await _photo(session, profile_id=profile_id, storage_key="photos/a.jpg")
     card_uuid = await _insert_card(session, author_id=author.id, place_id=place)
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 200
     body = response.json()
@@ -301,9 +297,7 @@ async def test_full_card_shows_author_profile(
         session, author_id=author.id, place_id=place, status="full", filled_count=3
     )
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 200
     assert response.json()["name"] == "Анна"
@@ -320,13 +314,9 @@ async def test_closed_card_still_shows_author_profile(
     author, author_token = await _new_user(session)
     _, viewer_token = await _new_user(session)
     place = await _place(session)
-    card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place, status="closed"
-    )
+    card_uuid = await _insert_card(session, author_id=author.id, place_id=place, status="closed")
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 200
 
@@ -344,13 +334,9 @@ async def test_archived_card_hides_author_profile(
     place = await _place(session)
     profile_id = await _profile(session, user=author)
     await _photo(session, profile_id=profile_id, storage_key="photos/a.jpg")
-    card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place, status=status
-    )
+    card_uuid = await _insert_card(session, author_id=author.id, place_id=place, status=status)
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 404
     assert response.json() == {"code": "card_not_found"}
@@ -386,12 +372,8 @@ async def test_three_reasons_share_one_body(
     archived = await client.get(
         f"/api/v1/cards/{archived_uuid}/author", headers=_auth(viewer_token)
     )
-    foreign = await client.get(
-        f"/api/v1/cards/{foreign_uuid}/author", headers=_auth(viewer_token)
-    )
-    missing = await client.get(
-        f"/api/v1/cards/{missing_uuid}/author", headers=_auth(viewer_token)
-    )
+    foreign = await client.get(f"/api/v1/cards/{foreign_uuid}/author", headers=_auth(viewer_token))
+    missing = await client.get(f"/api/v1/cards/{missing_uuid}/author", headers=_auth(viewer_token))
 
     assert archived.status_code == foreign.status_code == missing.status_code == 404
     assert archived.json() == foreign.json() == missing.json() == {"code": "card_not_found"}
@@ -411,13 +393,9 @@ async def test_author_sees_own_profile_on_draft(
     author, author_token = await _new_user(session)
     place = await _place(session)
     await _profile(session, user=author)
-    card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place, status="draft"
-    )
+    card_uuid = await _insert_card(session, author_id=author.id, place_id=place, status="draft")
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(author_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(author_token))
 
     assert response.status_code == 200
     assert response.json()["name"] == "Анна"
@@ -431,13 +409,9 @@ async def test_stranger_gets_404_on_draft(
     _, viewer_token = await _new_user(session)
     place = await _place(session)
     await _profile(session, user=author)
-    card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place, status="draft"
-    )
+    card_uuid = await _insert_card(session, author_id=author.id, place_id=place, status="draft")
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 404
     assert response.json() == {"code": "card_not_found"}
@@ -462,9 +436,7 @@ async def test_age_is_computed_from_birth_date(
     await _profile(session, user=author, birth_date=birth, age=40)
     card_uuid = await _insert_card(session, author_id=author.id, place_id=place)
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 200
     assert response.json()["age"] == 22
@@ -484,9 +456,7 @@ async def test_empty_profile_gives_nulls_not_error(
     place = await _place(session)
     card_uuid = await _insert_card(session, author_id=author.id, place_id=place)
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 200
     body = response.json()
@@ -526,9 +496,7 @@ async def test_photo_url_and_expiry_are_a_pair(
     assert without_photo.json()["photo_expires_in"] is None
 
     profile_id = (
-        await session.execute(
-            text("SELECT id FROM profiles WHERE user_id = :u"), {"u": author.id}
-        )
+        await session.execute(text("SELECT id FROM profiles WHERE user_id = :u"), {"u": author.id})
     ).scalar_one()
     await _photo(session, profile_id=int(profile_id), storage_key="photos/p.jpg")
 
@@ -556,17 +524,11 @@ def test_ttl_unit_boundaries() -> None:
         s3_signed_url_ttl = 900
 
     # Через 5 минут встреча → ссылка живёт 300 с, не 900.
-    assert _author_photo_ttl(
-        starts_at=now + timedelta(minutes=5), now=now, settings=_S()
-    ) == 300
+    assert _author_photo_ttl(starts_at=now + timedelta(minutes=5), now=now, settings=_S()) == 300
     # Через 40 минут → ограничение хранилища (900) сильнее остатка карточки.
-    assert _author_photo_ttl(
-        starts_at=now + timedelta(minutes=40), now=now, settings=_S()
-    ) == 900
+    assert _author_photo_ttl(starts_at=now + timedelta(minutes=40), now=now, settings=_S()) == 900
     # `starts_at` в прошлом (гонка воркера) → 1, не 0 и не отрицательное.
-    assert _author_photo_ttl(
-        starts_at=now - timedelta(minutes=10), now=now, settings=_S()
-    ) == 1
+    assert _author_photo_ttl(starts_at=now - timedelta(minutes=10), now=now, settings=_S()) == 1
 
 
 async def test_ttl_never_outlives_card(
@@ -583,13 +545,9 @@ async def test_ttl_never_outlives_card(
     profile_id = await _profile(session, user=author)
     await _photo(session, profile_id=profile_id, storage_key="photos/t.jpg")
     starts = datetime.now(UTC) + timedelta(minutes=5)
-    card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place, starts_at=starts
-    )
+    card_uuid = await _insert_card(session, author_id=author.id, place_id=place, starts_at=starts)
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 200
     expires_in = response.json()["photo_expires_in"]
@@ -620,9 +578,7 @@ async def _count_queries(
     listen_engine = getattr(bind_engine, "sync_engine", bind_engine)
     event.listen(listen_engine, "before_cursor_execute", counter)
     try:
-        response = await client.get(
-            f"/api/v1/cards/{card_uuid}/author", headers=_auth(token)
-        )
+        response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(token))
     finally:
         event.remove(listen_engine, "before_cursor_execute", counter)
     return counter.count, response.status_code
@@ -696,13 +652,9 @@ async def test_company_of_archived_card_is_still_available(
     member, member_token = await _new_user(session)
     place = await _place(session)
     await _profile(session, user=author)
-    card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place, status="finished"
-    )
+    card_uuid = await _insert_card(session, author_id=author.id, place_id=place, status="finished")
     card_id = (
-        await session.execute(
-            text("SELECT id FROM event_cards WHERE uuid = :u"), {"u": card_uuid}
-        )
+        await session.execute(text("SELECT id FROM event_cards WHERE uuid = :u"), {"u": card_uuid})
     ).scalar_one()
     await _participation(session, card_id=int(card_id), applicant_id=member.id)
 
@@ -780,13 +732,10 @@ async def test_showcase_response_has_exactly_declared_fields(
     await _profile(session, user=author)
     card_uuid = await _insert_card(session, author_id=author.id, place_id=place)
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token)
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}/author", headers=_auth(viewer_token))
 
     assert response.status_code == 200
     assert set(response.json()) == SHOWCASE_FIELDS
     assert FORBIDDEN_KEY not in response.text
     assert "within_bounds" not in response.text
     assert "age_confirmed" not in response.text
-

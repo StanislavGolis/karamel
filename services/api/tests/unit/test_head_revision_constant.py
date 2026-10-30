@@ -74,11 +74,7 @@ def test_head_revision_is_a_literal() -> None:
     само про форму записи, а не про поведение.
     """
     source = (API_ROOT / "tests" / "conftest.py").read_text(encoding="utf-8")
-    lines = [
-        line.strip()
-        for line in source.splitlines()
-        if line.startswith("HEAD_REVISION")
-    ]
+    lines = [line.strip() for line in source.splitlines() if line.startswith("HEAD_REVISION")]
     assert lines == [f'HEAD_REVISION = "{HEAD_REVISION}"'], (
         "HEAD_REVISION должна быть простой строковой константой в tests/conftest.py, "
         f"получено: {lines}"

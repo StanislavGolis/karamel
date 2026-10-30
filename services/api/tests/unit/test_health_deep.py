@@ -219,9 +219,7 @@ async def test_plain_health_still_does_not_touch_database(
     assert response.json() == {"status": "ok"}
 
 
-async def test_stale_backup_keeps_http_200(
-    client: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_stale_backup_keeps_http_200(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """A-9 (AC-4 стори 11.10): `backup: stale` НЕ меняет HTTP-код и `status`.
 
     **Почему это отдельный тест, а не следствие предыдущих.** Все прежние

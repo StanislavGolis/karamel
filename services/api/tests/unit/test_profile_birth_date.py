@@ -52,9 +52,7 @@ class TestCreateAcceptsBirthDate:
 
     def test_underage_rejected(self) -> None:
         """AC-4: менее 18 полных лет — отказ с кодом `underage`."""
-        payload = ProfileCreate(
-            name="Аня", city="Томск", birth_date=date(2010, 1, 1), bio="текст"
-        )
+        payload = ProfileCreate(name="Аня", city="Томск", birth_date=date(2010, 1, 1), bio="текст")
         with pytest.raises(ProfileFieldError) as excinfo:
             _validate_and_normalize_create(payload, PILOT_CITY, today=TODAY)
         assert excinfo.value.code == "underage"
@@ -68,9 +66,7 @@ class TestCreateAcceptsBirthDate:
         assert values["birth_date"] == date(2008, 10, 29)
 
     def test_future_date_rejected(self) -> None:
-        payload = ProfileCreate(
-            name="Аня", city="Томск", birth_date=date(2027, 1, 1), bio="текст"
-        )
+        payload = ProfileCreate(name="Аня", city="Томск", birth_date=date(2027, 1, 1), bio="текст")
         with pytest.raises(ProfileFieldError) as excinfo:
             _validate_and_normalize_create(payload, PILOT_CITY, today=TODAY)
         assert excinfo.value.code == "invalid_birth_date"

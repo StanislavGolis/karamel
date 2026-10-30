@@ -54,9 +54,7 @@ def _revision_files() -> dict[str, Path]:
 def _has_function(path: Path, name: str) -> bool:
     """Есть ли в файле миграции функция верхнего уровня `name`."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return any(
-        isinstance(node, ast.FunctionDef) and node.name == name for node in tree.body
-    )
+    return any(isinstance(node, ast.FunctionDef) and node.name == name for node in tree.body)
 
 
 def _missing_functions(revisions: dict[str, Path]) -> list[str]:
@@ -109,9 +107,7 @@ def test_missing_upgrade_is_detected(tmp_path: Path) -> None:
     """
     without_upgrade = tmp_path / "0099_only_downgrade.py"
     without_upgrade.write_text(
-        "from alembic import op\n\n"
-        "def downgrade() -> None:\n"
-        "    pass\n",
+        "from alembic import op\n\ndef downgrade() -> None:\n    pass\n",
         encoding="utf-8",
     )
     missing = _missing_functions({"0099": without_upgrade})
@@ -129,9 +125,7 @@ def test_missing_downgrade_is_detected(tmp_path: Path) -> None:
     """
     without_downgrade = tmp_path / "0098_only_upgrade.py"
     without_downgrade.write_text(
-        "from alembic import op\n\n"
-        "def upgrade() -> None:\n"
-        "    pass\n",
+        "from alembic import op\n\ndef upgrade() -> None:\n    pass\n",
         encoding="utf-8",
     )
     missing = _missing_functions({"0098": without_downgrade})
@@ -151,20 +145,14 @@ def test_every_revision_has_a_cycle_test(revisions: dict[str, Path]) -> None:
     тест с downgrade» и «есть тест, где названа ревизия» были бы разными
     фактами, и связь между ними держалась бы на честном слове.
     """
-    test_sources = [
-        (path, path.read_text(encoding="utf-8"))
-        for path in TESTS_DIR.rglob("*.py")
-    ]
+    test_sources = [(path, path.read_text(encoding="utf-8")) for path in TESTS_DIR.rglob("*.py")]
     uncovered = [
         revision
         for revision in revisions
-        if not any(
-            revision in source and "downgrade" in source for _path, source in test_sources
-        )
+        if not any(revision in source and "downgrade" in source for _path, source in test_sources)
     ]
     assert uncovered == [], (
-        "ревизии без цикла-теста (упоминание + `downgrade` в одном файле): "
-        f"{uncovered}"
+        f"ревизии без цикла-теста (упоминание + `downgrade` в одном файле): {uncovered}"
     )
 
 

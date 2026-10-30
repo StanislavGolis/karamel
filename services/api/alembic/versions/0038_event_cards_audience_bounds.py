@@ -93,9 +93,7 @@ def upgrade() -> None:
     # AC-1a/AC-1b: белые списки и порядок границ. Имена короткие — префикс
     # добавит convention.
     op.create_check_constraint(AGE_RANGE_CONSTRAINT, "event_cards", _AGE_RANGE_CHECK)
-    op.create_check_constraint(
-        GENDER_FILTER_CONSTRAINT, "event_cards", _GENDER_FILTER_CHECK
-    )
+    op.create_check_constraint(GENDER_FILTER_CONSTRAINT, "event_cards", _GENDER_FILTER_CHECK)
 
 
 def downgrade() -> None:
@@ -112,9 +110,7 @@ def downgrade() -> None:
     op.drop_constraint(
         op.f(f"ck_event_cards_{GENDER_FILTER_CONSTRAINT}"), "event_cards", type_="check"
     )
-    op.drop_constraint(
-        op.f(f"ck_event_cards_{AGE_RANGE_CONSTRAINT}"), "event_cards", type_="check"
-    )
+    op.drop_constraint(op.f(f"ck_event_cards_{AGE_RANGE_CONSTRAINT}"), "event_cards", type_="check")
     op.drop_column("event_cards", "age_max")
     op.drop_column("event_cards", "age_min")
     op.drop_column("event_cards", "gender_filter")

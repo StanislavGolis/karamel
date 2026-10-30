@@ -350,9 +350,7 @@ async def test_update_own_draft_changes_fields_and_expires(
     # («пересчёт `expires_at`»), а по дальности даты. Предмет сохранён:
     # создание на 24 ч, правка на 48 ч — движение ВПЕРЁД внутри горизонта,
     # поэтому `expires_at` обязан вырасти.
-    card_uuid = await _create_card(
-        client, session, token, starts_at=_starts_at(days=1).isoformat()
-    )
+    card_uuid = await _create_card(client, session, token, starts_at=_starts_at(days=1).isoformat())
     before = await _card_row(session, card_uuid)
     new_starts = _starts_at(days=2).isoformat()
 
@@ -646,16 +644,12 @@ async def test_get_foreign_city_card_is_404_over_http(
     assert published.status_code == 200, published.text
 
     # 2. Базовая линия (P-19): автор сообщества карточку ВИДИТ.
-    own = await client.get(
-        f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: author_token}
-    )
+    own = await client.get(f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: author_token})
     assert own.status_code == 200, own.text
 
     # 3. Зритель другого сообщества.
     other = "other-city"
-    monkeypatch.setattr(
-        settings, "city_slugs", (*settings.city_slugs, other)
-    )
+    monkeypatch.setattr(settings, "city_slugs", (*settings.city_slugs, other))
     phone = f"+7906{uuid_lib.uuid4().int % 10**7:07d}"
     stranger = await UserRepository(session).create(
         provider="phone", provider_user_id=phone, phone=phone, city_slug=other

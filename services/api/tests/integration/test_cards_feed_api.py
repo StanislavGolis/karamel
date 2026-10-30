@@ -481,9 +481,7 @@ async def test_get_card_by_uuid_returns_full_form(
     assert body["chat_uuid"] is None
 
 
-async def test_get_card_from_other_city_is_404(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_get_card_from_other_city_is_404(client: AsyncClient, session: AsyncSession) -> None:
     """AC-02 (ADR-13): карточка другого сообщества — `404`, не `403`.
 
     Краснеет от снятия среза `city_slug` в билдере: участник получал бы

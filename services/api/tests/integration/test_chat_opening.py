@@ -1007,7 +1007,7 @@ async def test_lazy_read_writes_chat_opened_after_commit(
                 session,
                 card_uuid=card_uuid,
                 viewer_id=int(viewer.id),
-            viewer_city_slug="tomsk",
+                viewer_city_slug="tomsk",
                 settings=_CardFeedSettings(),
             )
     finally:

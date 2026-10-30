@@ -19,13 +19,20 @@ from __future__ import annotations
 
 import uuid as uuid_lib
 from datetime import date, datetime
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from app.core.datetime_format import iso_utc
 from app.models.enums import Gender
 from app.services.age_service import compute_age, today_or_now
+
+if TYPE_CHECKING:
+    # Только для типизации: `from_profile` принимает ORM-объект `Profile`.
+    # Рантайм-импорт замкнул бы цикл `models` ↔ `schemas` (`models/notification.py`
+    # уже импортирует `app.schemas.ws`), а `from __future__ import annotations`
+    # делает аннотацию ленивой — на импорте модуля тип не нужен.
+    from app.models.profile import Profile
 
 
 class ProfilePublic(BaseModel):
@@ -60,7 +67,7 @@ class ProfilePublic(BaseModel):
         return iso_utc(value)
 
     @classmethod
-    def from_profile(cls, profile: object, *, today: date | None = None) -> Self:
+    def from_profile(cls, profile: Profile, *, today: date | None = None) -> Self:
         """Собирает ответ из ORM-объекта, **вычисляя** `age` (AC-2, AC-3).
 
         `from_attributes` здесь не работает: в модели `age` — legacy-колонка,
@@ -73,21 +80,46 @@ class ProfilePublic(BaseModel):
         и `model_validate` его не читает (ADR-18, NFR66). Гард на отсутствие
         ключа в JSON — стори 12.3.
         """
-        values = {
-            "uuid": profile.uuid,
-            "name": profile.name,
-            # AC-2, AC-5: `birth_date` приоритетнее legacy-`age`.
-            "age": compute_age(profile.birth_date, profile.age, today or today_or_now()),
-            "city": profile.city,
-            "bio": profile.bio,
-            "gender": profile.gender,
-            "created_at": profile.created_at,
-            "updated_at": profile.updated_at,
-        }
+        # AC-2, AC-5: `birth_date` приоритетнее legacy-`age`.
+        computed_age = compute_age(profile.birth_date, profile.age, today or today_or_now())
+        # Явные аргументы, а не `cls(**values)`: mypy (strict) на `**dict` с
+        # union-значениями теряет типы и падает на каждом поле. `cast` для
+        # `gender`/`status` — это сужение ОБЪЯВЛЕНИЯ, а не отключение проверки:
+        # конструктор Pydantic всё равно валидирует значение в рантайме
+        # (`str` из ORM → `Gender`, как и раньше), поэтому поведение то же.
+        # Источник значений — колонки БД под CHECK, а не вход пользователя.
         if cls is ProfileOwn:
-            values["is_hidden"] = profile.is_hidden
-            values["status"] = profile.status
-        return cls(**values)
+            # `cast` — не подавление: проверка `cls is ProfileOwn` выше уже
+            # гарантирует тип в рантайме, mypy лишь не сужает `type[Self]` по
+            # сравнению с классом. Наследников `ProfileOwn` в проекте нет
+            # (замер: `grep -rnE '^class .*\((ProfileOwn|ProfilePublic)'` → 0),
+            # поэтому ветка исчерпывающая.
+            own_cls = cast("type[ProfileOwn]", cls)
+            return cast(
+                Self,
+                own_cls(
+                    uuid=profile.uuid,
+                    name=profile.name,
+                    age=computed_age,
+                    city=profile.city,
+                    bio=profile.bio,
+                    gender=cast(Gender, profile.gender),
+                    created_at=profile.created_at,
+                    updated_at=profile.updated_at,
+                    is_hidden=profile.is_hidden,
+                    status=cast('Literal["draft", "complete"]', profile.status),
+                ),
+            )
+        return cls(
+            uuid=profile.uuid,
+            name=profile.name,
+            age=computed_age,
+            city=profile.city,
+            bio=profile.bio,
+            gender=cast(Gender, profile.gender),
+            created_at=profile.created_at,
+            updated_at=profile.updated_at,
+        )
 
 
 class ProfileOwn(ProfilePublic):

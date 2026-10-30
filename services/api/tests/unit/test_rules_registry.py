@@ -131,16 +131,13 @@ def _function(path: str, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | 
 def test_every_rule_has_exactly_one_registry_entry() -> None:
     """AC-1: реестр содержит РОВНО 12 ключей — ни одного пропуска, ни лишнего."""
     assert set(RULES) == ALL_RULES, (
-        f"пропущены: {sorted(ALL_RULES - set(RULES))}, "
-        f"лишние: {sorted(set(RULES) - ALL_RULES)}"
+        f"пропущены: {sorted(ALL_RULES - set(RULES))}, лишние: {sorted(set(RULES) - ALL_RULES)}"
     )
 
 
 def test_registry_points_to_existing_tests() -> None:
     """AC-1: каждый путь существует, и в файле есть тест с заявленным именем."""
-    missing_files = [
-        rule for rule, (path, _) in RULES.items() if not (API_ROOT / path).is_file()
-    ]
+    missing_files = [rule for rule, (path, _) in RULES.items() if not (API_ROOT / path).is_file()]
     assert missing_files == [], f"файлы тестов не найдены: {missing_files}"
 
     missing_tests = [
@@ -191,9 +188,7 @@ def test_registry_test_carries_rule_marker() -> None:
         ("AC-1 без номера правила", "П5", False),
     ],
 )
-def test_marker_boundary_rejects_substring(
-    docstring: str, rule: str, expected: bool
-) -> None:
+def test_marker_boundary_rejects_substring(docstring: str, rule: str, expected: bool) -> None:
     """AC-1 (H-1 CR 12.9): метка ищется как ТОКЕН, а не как подстрока.
 
     **Дыра, которую закрывает тест.** CR 12.9 доказал дважды, что прежняя

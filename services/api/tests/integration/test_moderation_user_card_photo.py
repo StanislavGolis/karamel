@@ -69,7 +69,8 @@ async def _add_photo(
         text(
             "INSERT INTO profile_photos (profile_id, storage_key, position, status, "
             "content_type, size_bytes, consent_given_at, moderated_at, rejection_reason) "
-            f"VALUES (:p, :k, :pos, :st, 'image/jpeg', 1000, now(), {moderated_at}, {rejection_reason})"
+            f"VALUES (:p, :k, :pos, :st, 'image/jpeg', 1000, now(), "
+            f"{moderated_at}, {rejection_reason})"
         ),
         {"p": profile_id, "k": storage_key, "pos": position, "st": status},
     )
@@ -92,7 +93,9 @@ async def _with_signer(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(moderation_user_card_service, "get_signed_url", _sign)
 
 
-async def test_approved_photo_is_signed(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_approved_photo_is_signed(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """AC-1, AC-9: у одобренного фото появляется подписанный URL и срок."""
     await _with_signer(monkeypatch)
     target, _ = await make_target_user(session)
@@ -119,8 +122,12 @@ async def test_pending_and_rejected_are_not_signed(
     target, _ = await make_target_user(session)
     await set_profile(session, user=target)
     profile_id = await _profile_id(session, user_id=target.id)
-    await _add_photo(session, profile_id=profile_id, storage_key="photos/b/1.jpg", position=1, status="pending")
-    await _add_photo(session, profile_id=profile_id, storage_key="photos/b/2.jpg", position=2, status="rejected")
+    await _add_photo(
+        session, profile_id=profile_id, storage_key="photos/b/1.jpg", position=1, status="pending"
+    )
+    await _add_photo(
+        session, profile_id=profile_id, storage_key="photos/b/2.jpg", position=2, status="rejected"
+    )
     _, token = await make_moderator(session)
 
     async with build_client(session) as client:
@@ -203,7 +210,9 @@ async def test_storage_failure_does_not_break_card(session: AsyncSession) -> Non
     assert body["profile"]["city"] == "Томск"
 
 
-async def test_storage_key_never_leaves(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_storage_key_never_leaves(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """AC-10, D-11: `storage_key` не появляется в сыром теле ответа."""
     await _with_signer(monkeypatch)
     target, _ = await make_target_user(session)
@@ -284,9 +293,7 @@ async def test_storage_unavailable_does_not_break_card(
         raise media_service.MediaUnavailableError("S3 credentials are not configured")
 
     monkeypatch.setattr(media_service, "get_signed_url", _raise_unavailable)
-    monkeypatch.setattr(
-        moderation_user_card_service, "get_signed_url", _raise_unavailable
-    )
+    monkeypatch.setattr(moderation_user_card_service, "get_signed_url", _raise_unavailable)
 
     async with build_client(session) as client:
         response = await get_card(client, token=token, user_uuid=target.uuid)

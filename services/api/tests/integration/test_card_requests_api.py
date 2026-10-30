@@ -317,9 +317,7 @@ async def test_non_author_gets_same_404_as_missing_card(
     assert foreign.json()["code"] == "card_not_found"
 
 
-async def test_other_city_card_is_not_found(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_other_city_card_is_not_found(client: AsyncClient, session: AsyncSession) -> None:
     """AC-02: карточка другого сообщества — `404`, а не пустой список."""
     author, token = await _new_user(session)
     place_id = await _place(session)

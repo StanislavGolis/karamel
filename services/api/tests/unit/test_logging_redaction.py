@@ -322,9 +322,9 @@ def test_sensitive_processor_wired_into_configure_logging() -> None:
     """
     configure_logging()
     processors = structlog.get_config()["processors"]
-    assert any(
-        isinstance(item, RedactingSensitiveProcessor) for item in processors
-    ), "RedactingSensitiveProcessor не подключён в configure_logging"
+    assert any(isinstance(item, RedactingSensitiveProcessor) for item in processors), (
+        "RedactingSensitiveProcessor не подключён в configure_logging"
+    )
     # Порядок: редакция ПД обязана стоять ДО рендерера, иначе значение уже
     # сериализовано в строку и подмена по ключу невозможна.
     names = [type(item).__name__ for item in processors]

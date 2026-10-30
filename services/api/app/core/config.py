@@ -559,9 +559,7 @@ class Settings(BaseSettings):
         try:
             ZoneInfo(v)
         except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise ValueError(
-                f"CITY_TIMEZONE: зона {v!r} отсутствует в базе IANA: {exc}"
-            ) from exc
+            raise ValueError(f"CITY_TIMEZONE: зона {v!r} отсутствует в базе IANA: {exc}") from exc
         return v
 
     @field_validator("card_default_decision_window_minutes")

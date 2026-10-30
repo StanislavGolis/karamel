@@ -169,9 +169,7 @@ def _card_to_read(item: CardFeedItem) -> EventCardRead:
         # `gender_filter` приводится к `Gender` тем же способом, что `kind`
         # и `activity`: рассинхрон CHECK со `StrEnum` станет видимым `500`
         # на собственном дефекте, а не уйдёт клиенту строкой.
-        gender_filter=(
-            Gender(card.gender_filter) if card.gender_filter is not None else None
-        ),
+        gender_filter=(Gender(card.gender_filter) if card.gender_filter is not None else None),
         age_min=card.age_min,
         age_max=card.age_max,
         starts_at=card.starts_at,

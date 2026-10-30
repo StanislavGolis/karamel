@@ -189,9 +189,7 @@ async def test_post_with_other_activity_is_rejected(
     assert response.status_code == 422, response.text
 
 
-async def _created_card_body(
-    client: AsyncClient, token: str, response: Any
-) -> dict[str, Any]:
+async def _created_card_body(client: AsyncClient, token: str, response: Any) -> dict[str, Any]:
     """Читает созданную карточку детальным эндпоинтом (AC-7).
 
     Чтение обязательно: `EventCardRef` (ответ `POST`) не содержит
@@ -200,9 +198,7 @@ async def _created_card_body(
     в CR 12.4 (H-3).
     """
     card_uuid = str(response.json()["uuid"])
-    fetched = await client.get(
-        f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    fetched = await client.get(f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: token})
     assert fetched.status_code == 200, fetched.text
     return dict(fetched.json())
 
@@ -229,7 +225,10 @@ async def test_capacity_one_with_company_is_stored_as_company(
     response = await client.post(
         "/api/v1/cards",
         json=_payload(
-            place_uuid, capacity=1, kind="company", activity="bar",
+            place_uuid,
+            capacity=1,
+            kind="company",
+            activity="bar",
             decision_window_minutes=60,
         ),
         cookies={ACCESS_COOKIE_NAME: token},
@@ -262,7 +261,10 @@ async def test_capacity_one_with_date_is_stored_as_date(
     response = await client.post(
         "/api/v1/cards",
         json=_payload(
-            place_uuid, capacity=1, kind="date", activity="cinema",
+            place_uuid,
+            capacity=1,
+            kind="date",
+            activity="cinema",
             decision_window_minutes=60,
         ),
         cookies={ACCESS_COOKIE_NAME: token},

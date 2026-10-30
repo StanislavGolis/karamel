@@ -66,9 +66,7 @@ class JoinRequestRepository:
     # ——— билдеры (проверяются без БД, §18.2) ———
 
     @staticmethod
-    def build_get_for_request_statement(
-        card_uuid: uuid_lib.UUID, city_slug: str
-    ) -> Select[Any]:
+    def build_get_for_request_statement(card_uuid: uuid_lib.UUID, city_slug: str) -> Select[Any]:
         """AC-07 (ADR-13): карточка для подачи заявки — с срезом сообщества.
 
         `city_slug` обязателен в SQL, а не в `if` после выборки: карточка
@@ -526,15 +524,11 @@ class JoinRequestRepository:
     async def count_my_requests(self, *, applicant_id: int, city_slug: str) -> int:
         """AC-06: `total` без курсора (листание его не меняет)."""
         result = await self._session.execute(
-            self.build_my_requests_count_statement(
-                applicant_id=applicant_id, city_slug=city_slug
-            )
+            self.build_my_requests_count_statement(applicant_id=applicant_id, city_slug=city_slug)
         )
         return int(result.scalar_one())
 
-    async def get_card_for_join(
-        self, card_uuid: uuid_lib.UUID, city_slug: str
-    ) -> EventCard | None:
+    async def get_card_for_join(self, card_uuid: uuid_lib.UUID, city_slug: str) -> EventCard | None:
         """AC-11 (ADR-13, стори 5а.5): карточка для мгновенного присоединения.
 
         Тот же билдер, что у заявки (`build_get_for_request_statement`): срез
@@ -714,9 +708,7 @@ class JoinRequestRepository:
         if not card_ids:
             return ViewerRequestState(participating=frozenset(), pending={})
         result = await self._session.execute(
-            self.build_viewer_request_state_statement(
-                applicant_id=applicant_id, card_ids=card_ids
-            )
+            self.build_viewer_request_state_statement(applicant_id=applicant_id, card_ids=card_ids)
         )
         participating: set[int] = set()
         pending: dict[int, uuid_lib.UUID] = {}
@@ -731,9 +723,7 @@ class JoinRequestRepository:
         return ViewerRequestState(participating=frozenset(participating), pending=pending)
 
     @staticmethod
-    def build_get_card_for_select_statement(
-        request_uuid: uuid_lib.UUID, city_slug: str
-    ) -> Any:
+    def build_get_card_for_select_statement(request_uuid: uuid_lib.UUID, city_slug: str) -> Any:
         """AC-01, AC-04 стори 5б.2: карточка и `id` заявки — по `uuid` заявки.
 
         На входе `select` есть только `request_uuid` (он в пути), а решение

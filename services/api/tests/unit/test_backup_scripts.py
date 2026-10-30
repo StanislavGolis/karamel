@@ -183,7 +183,7 @@ def test_pg_backup_never_logs_secrets() -> None:
         if line.lstrip().startswith("#"):
             continue
         assert "printenv" not in line, f"печать окружения в лог: {line.strip()!r}"
-        assert "echo $S3_BACKUP" not in line and "echo \"$S3_BACKUP" not in line
+        assert "echo $S3_BACKUP" not in line and 'echo "$S3_BACKUP' not in line
 
 
 def test_media_backup_script_exists() -> None:
@@ -388,5 +388,6 @@ def test_upload_block_logs_every_pruned_key() -> None:
     # печатается как 39. Проверяется эффект (объект распознан как старый и
     # перечислен), а не число, зависящее от дрейфа часов.
     assert "backup.s3_pruned key=db/old.dump age_days=" in result.stdout
-    logged_age = int(result.stdout.split("backup.s3_pruned key=db/old.dump age_days=")[1].split()[0])
+    marker = "backup.s3_pruned key=db/old.dump age_days="
+    logged_age = int(result.stdout.split(marker)[1].split()[0])
     assert logged_age >= 39

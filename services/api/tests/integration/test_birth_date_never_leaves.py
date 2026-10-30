@@ -168,9 +168,7 @@ async def test_feed_returns_computed_age_not_column(
     author_id = await _author_with_birth_date(session, 30)
     await _published_card(session, author_id)
 
-    response = await client.get(
-        "/api/v1/cards", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get("/api/v1/cards", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 200
     items = response.json()["items"]
@@ -178,9 +176,7 @@ async def test_feed_returns_computed_age_not_column(
     assert items[0]["author"]["age"] == 30
 
 
-async def test_feed_never_exposes_birth_date(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_feed_never_exposes_birth_date(client: AsyncClient, session: AsyncSession) -> None:
     """AC-3, NFR66: `birth_date` отсутствует в ответе на любом уровне.
 
     Рекурсивная проверка, а не поиск по строке: поле могло бы появиться
@@ -192,14 +188,10 @@ async def test_feed_never_exposes_birth_date(
     author_id = await _author_with_birth_date(session, 30)
     await _published_card(session, author_id)
 
-    response = await client.get(
-        "/api/v1/cards", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get("/api/v1/cards", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 200
-    assert _no_birth_date_anywhere(response.json()), (
-        "birth_date утёк в read-ответ (NFR66, ADR-18)"
-    )
+    assert _no_birth_date_anywhere(response.json()), "birth_date утёк в read-ответ (NFR66, ADR-18)"
 
 
 async def test_own_profile_never_exposes_birth_date(
@@ -362,9 +354,7 @@ async def _pending_card(session: AsyncSession, author_id: int) -> str:
     return str(card_uuid)
 
 
-async def test_card_detail_returns_computed_age(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_card_detail_returns_computed_age(client: AsyncClient, session: AsyncSession) -> None:
     """AC-3, поверхность 3: `GET /cards/{uuid}` → `EventCardAuthor.age` вычислен.
 
     Краснеет, если в `get_card` вернуть колонку `Profile.age` вместо
@@ -375,9 +365,7 @@ async def test_card_detail_returns_computed_age(
     author_id = await _author_with_birth_date(session, 30)
     card_uuid = await _published_card(session, author_id)
 
-    response = await client.get(
-        f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: token}
-    )
+    response = await client.get(f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: token})
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -397,8 +385,11 @@ async def test_card_requests_person_age_computed(
     """
     author_phone = f"+7901{uuid_lib.uuid4().int % 10**7:07d}"
     author = await UserRepository(session).create(
-        provider="phone", provider_user_id=author_phone, phone=author_phone,
-        role="user", status="active",
+        provider="phone",
+        provider_user_id=author_phone,
+        phone=author_phone,
+        role="user",
+        status="active",
     )
     author.age_confirmed = True
     author.consent_given_at = datetime.now(UTC)
@@ -431,8 +422,12 @@ async def test_card_requests_person_age_computed(
             ":expires, 'published', 0, 'approved', :published_at, 'company', 'coffee') RETURNING id"
         ),
         {
-            "uuid": card_uuid, "author": author.id, "place": place_id, "slug": _city(),
-            "starts": starts, "expires": starts - timedelta(hours=1),
+            "uuid": card_uuid,
+            "author": author.id,
+            "place": place_id,
+            "slug": _city(),
+            "starts": starts,
+            "expires": starts - timedelta(hours=1),
             "published_at": starts - timedelta(days=1),
         },
     )
@@ -446,8 +441,11 @@ async def test_card_requests_person_age_computed(
             "VALUES (:uuid, :card, :applicant, 'привет', 'pending', :now, :expires)"
         ),
         {
-            "uuid": uuid_lib.uuid4(), "card": card_id, "applicant": applicant_id,
-            "now": now, "expires": now + timedelta(hours=1),
+            "uuid": uuid_lib.uuid4(),
+            "card": card_id,
+            "applicant": applicant_id,
+            "now": now,
+            "expires": now + timedelta(hours=1),
         },
     )
     await session.flush()
@@ -464,9 +462,7 @@ async def test_card_requests_person_age_computed(
     assert _no_birth_date_anywhere(body), "birth_date утёк в список заявителей"
 
 
-async def test_participants_age_computed(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_participants_age_computed(client: AsyncClient, session: AsyncSession) -> None:
     """AC-3, поверхность 5: `GET /cards/{uuid}/participants` → `items[].age`.
 
     Краснеет, если заменить `compute_age` на `participant.age` (M12):
@@ -497,9 +493,7 @@ async def test_participants_age_computed(
     assert _no_birth_date_anywhere(body), "birth_date утёк в состав компании"
 
 
-async def test_my_requests_age_computed(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_my_requests_age_computed(client: AsyncClient, session: AsyncSession) -> None:
     """AC-3, поверхность 6: `GET /my/requests` → `items[].author.age`.
 
     Краснеет, если в `list_my_requests` вернуть колонку `author_age`:
@@ -507,8 +501,11 @@ async def test_my_requests_age_computed(
     """
     applicant_phone = f"+7900{uuid_lib.uuid4().int % 10**7:07d}"
     applicant = await UserRepository(session).create(
-        provider="phone", provider_user_id=applicant_phone, phone=applicant_phone,
-        role="user", status="active",
+        provider="phone",
+        provider_user_id=applicant_phone,
+        phone=applicant_phone,
+        role="user",
+        status="active",
     )
     applicant.age_confirmed = True
     applicant.consent_given_at = datetime.now(UTC)
@@ -526,8 +523,11 @@ async def test_my_requests_age_computed(
             "VALUES (:uuid, :card, :applicant, 'привет', 'pending', :now, :expires)"
         ),
         {
-            "uuid": uuid_lib.uuid4(), "card": card_id, "applicant": applicant.id,
-            "now": now, "expires": now + timedelta(hours=1),
+            "uuid": uuid_lib.uuid4(),
+            "card": card_id,
+            "applicant": applicant.id,
+            "now": now,
+            "expires": now + timedelta(hours=1),
         },
     )
     await session.flush()

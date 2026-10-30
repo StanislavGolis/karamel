@@ -63,7 +63,9 @@ async def _set_birth_date(session: AsyncSession, *, user_id: int, value: date | 
     await session.flush()
 
 
-async def _audit_rows(session: AsyncSession) -> list[tuple[str, str | None, str | None, str | None]]:
+async def _audit_rows(
+    session: AsyncSession,
+) -> list[tuple[str, str | None, str | None, str | None]]:
     """Строки аудита: `action`, `moderator_uuid`, `subject_uuid`, `route`."""
     result = await session.execute(
         text(

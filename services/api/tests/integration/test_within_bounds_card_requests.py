@@ -249,9 +249,7 @@ async def test_author_sees_within_bounds_for_each_applicant(
     )
 
 
-async def test_gender_filter_marks_outsider(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_gender_filter_marks_outsider(client: AsyncClient, session: AsyncSession) -> None:
     """AC-1b, AC-3: рамка по полу отсекает по `users.gender`, не по анкете.
 
     Оба заявителя без даты рождения и без числа — их возраст НЕИЗВЕСТЕН,
@@ -286,9 +284,7 @@ async def test_gender_filter_marks_outsider(
     )
 
 
-async def test_birth_date_wins_over_legacy_age(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_birth_date_wins_over_legacy_age(client: AsyncClient, session: AsyncSession) -> None:
     """AC-3, U10: `birth_date` приоритетнее legacy `age`.
 
     У заявителя `birth_date` = 22 года и legacy `age` = 40. Рамка `age_min=30`.
@@ -324,9 +320,7 @@ async def test_birth_date_wins_over_legacy_age(
     )
 
 
-async def test_unknown_age_is_out_of_bounds(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_unknown_age_is_out_of_bounds(client: AsyncClient, session: AsyncSession) -> None:
     """AC-3, U11: нет ни даты, ни числа ⇒ `within_bounds = false`.
 
     Анкеты может не быть вовсе (онбординг не пройден). «Неизвестно» — это
@@ -354,9 +348,7 @@ async def test_unknown_age_is_out_of_bounds(
     )
 
 
-async def test_card_without_bounds_reports_null(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_card_without_bounds_reports_null(client: AsyncClient, session: AsyncSession) -> None:
     """AC-3: карточка без рамок — `within_bounds` = `null` (проверять нечего).
 
     Отличие от `false` принципиально: `false` сказал бы автору «вне рамок»
@@ -399,9 +391,7 @@ async def test_applicant_my_requests_has_no_within_bounds(
     _, card_id = await _insert_card(session, author_id=author.id, place_id=place_id, age_min=30)
 
     applicant, applicant_token = await _new_user(session)
-    await _profile(
-        session, user=applicant, name="Молодой", birth_date=_birth_date_for_age(22)
-    )
+    await _profile(session, user=applicant, name="Молодой", birth_date=_birth_date_for_age(22))
     await _insert_request(session, card_id=card_id, applicant_id=applicant.id)
 
     response = await client.get(
@@ -427,14 +417,10 @@ async def test_applicant_join_response_has_no_within_bounds(
     """
     author, _ = await _new_user(session)
     place_id = await _place(session)
-    card_uuid, _ = await _insert_card(
-        session, author_id=author.id, place_id=place_id, age_min=30
-    )
+    card_uuid, _ = await _insert_card(session, author_id=author.id, place_id=place_id, age_min=30)
 
     applicant, applicant_token = await _new_user(session)
-    await _profile(
-        session, user=applicant, name="Молодой", birth_date=_birth_date_for_age(22)
-    )
+    await _profile(session, user=applicant, name="Молодой", birth_date=_birth_date_for_age(22))
     await session.flush()
 
     response = await client.post(
@@ -455,9 +441,7 @@ async def test_applicant_join_response_has_no_within_bounds(
 # ——— AC-2a: рамки видны в карточке до подачи ——————————————————————————————
 
 
-async def test_card_read_exposes_bounds(
-    client: AsyncClient, session: AsyncSession
-) -> None:
+async def test_card_read_exposes_bounds(client: AsyncClient, session: AsyncSession) -> None:
     """AC-2a: `EventCardRead` отдаёт три поля рамок — заявитель знает заранее.
 
     Без этого «рамки показаны до подачи» выполнялось бы только на словах:

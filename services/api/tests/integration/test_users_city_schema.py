@@ -213,8 +213,7 @@ async def test_model_matches_migration(session: AsyncSession) -> None:
         for row in (
             await session.execute(
                 text(
-                    "SELECT column_name FROM information_schema.columns "
-                    " WHERE table_name = 'users'"
+                    "SELECT column_name FROM information_schema.columns  WHERE table_name = 'users'"
                 )
             )
         ).all()

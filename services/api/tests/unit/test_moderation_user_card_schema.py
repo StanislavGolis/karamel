@@ -38,9 +38,7 @@ def test_profile_accepts_null_optional_fields() -> None:
     неотличимый от честного «версия неизвестна». Поэтому здесь оно передаётся
     явно: у учётки без согласия версия именно `None`.
     """
-    profile = ModerationUserProfile(
-        uuid=uuid_lib.uuid4(), status="banned", consent_version=None
-    )
+    profile = ModerationUserProfile(uuid=uuid_lib.uuid4(), status="banned", consent_version=None)
     assert profile.name is None
     assert profile.city is None
     assert profile.age is None

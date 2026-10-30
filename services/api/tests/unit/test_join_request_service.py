@@ -76,9 +76,7 @@ class _Repo:
         # CR 5а.2, патч 2: журнал порядка обращений к БД.
         self._log = log
 
-    async def get_card_for_request(
-        self, card_uuid: uuid_lib.UUID, city_slug: str
-    ) -> _Card | None:
+    async def get_card_for_request(self, card_uuid: uuid_lib.UUID, city_slug: str) -> _Card | None:
         # CR 5а.2, патч 2: отметка о чтении карточки — без неё порядок
         # «блокировка ДО карточки» не наблюдаем: фейк не идёт в `session.execute`.
         if self._log is not None:
