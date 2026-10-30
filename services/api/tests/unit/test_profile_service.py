@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from app.schemas.profile import ProfileCreate, ProfileUpdate
@@ -34,7 +36,14 @@ def _create(**overrides: object) -> ProfileCreate:
     Проверять их нужно: сервис вызывается не только из HTTP — из воркера
     и миграции данные приходят без Pydantic, и там единственная защита — эта.
     """
-    payload = {"name": "Аня", "city": "Томск", "age": 32, "bio": "люблю горы"}
+    payload = {
+        "name": "Аня",
+        "city": "Томск",
+        # Стори 12.2, AC-2: вместо числа лет — дата рождения.
+        # 1994-03-14 на 2026-10-29 даёт 32 полных года.
+        "birth_date": date(1994, 3, 14),
+        "bio": "люблю горы",
+    }
     payload.update(overrides)
     return ProfileCreate.model_construct(**payload)
 
@@ -93,17 +102,30 @@ def test_too_long_value_raises_domain_code(field: str, value: str, code: str) ->
     assert exc.value.code == code
 
 
-@pytest.mark.parametrize("age", [17, 100, 0, -1])
-def test_age_out_of_range_raises_invalid_age(age: int) -> None:
-    """AC-05: возраст вне 18..99 — `422 invalid_age`.
+@pytest.mark.parametrize(
+    ("birth_date", "code"),
+    [
+        # Стори 12.2, AC-4: 16 полных лет на 2026-10-29.
+        (date(2010, 1, 1), "underage"),
+        # Верхняя граница `AGE_MAX`: 126 лет — опечатка в годе.
+        (date(1900, 1, 1), "invalid_birth_date"),
+        # Дата в будущем.
+        (date(2027, 1, 1), "invalid_birth_date"),
+    ],
+)
+def test_birth_date_out_of_range_raises_domain_code(birth_date: date, code: str) -> None:
+    """AC-4, AC-5: недопустимая дата — `422 underage` / `422 invalid_birth_date`.
 
-    Доменный код нужен по той же причине, что и для длин: CHECK в БД
-    (`age >= 18 AND age <= 99`) вернул бы `IntegrityError` → `500`.
+    Доменный код нужен по той же причине, что и для длин: CHECK в БД вернул
+    бы `IntegrityError` → `500`. Границы проверяются на фиксированной дате,
+    иначе тест «работает» только в день написания (AC-6).
     """
     with pytest.raises(ProfileFieldError) as exc:
-        _validate_and_normalize_create(_create(age=age), PILOT_CITY)
+        _validate_and_normalize_create(
+            _create(birth_date=birth_date), PILOT_CITY, today=date(2026, 10, 29)
+        )
 
-    assert exc.value.code == "invalid_age"
+    assert exc.value.code == code
 
 
 # --- AC-04: нормализация применяется -------------------------------------------------
@@ -120,7 +142,12 @@ def test_create_normalizes_city_and_bio() -> None:
         _create(city="  ТОМСК ", bio="люблю\u00a0\u00a0горы"), PILOT_CITY
     )
 
-    assert values == {"name": "Аня", "city": "Томск", "age": 32, "bio": "люблю горы"}
+    assert values == {
+        "name": "Аня",
+        "city": "Томск",
+        "birth_date": date(1994, 3, 14),
+        "bio": "люблю горы",
+    }
 
 
 # --- AC-03: частичная правка ---------------------------------------------------------

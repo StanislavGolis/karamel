@@ -2,17 +2,30 @@
 
 project-context §6: здесь только запросы, правила домена — в
 `services/join_request_service.py`. Билдеры статические, чтобы текст SQL
-проверялся без БД (§18.2): потеря `community_slug` или `FOR UPDATE` — реальные
+проверялся без БД (§18.2): потеря `city_slug` или `FOR UPDATE` — реальные
 дефекты, которые падение интеграционного теста объясняет косвенно.
 """
 
 from __future__ import annotations
 
 import uuid as uuid_lib
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import and_, case, exists, func, or_, select, tuple_, update
+from sqlalchemy import (
+    Boolean,
+    and_,
+    case,
+    exists,
+    func,
+    null,
+    or_,
+    select,
+    tuple_,
+    update,
+)
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
@@ -30,6 +43,20 @@ from app.models.profile import Profile
 from app.models.user import User
 
 
+@dataclass(frozen=True)
+class ViewerRequestState:
+    """AC-09 5б.2 + AC-2 11.5: обе роли зрителя из ОДНОГО запроса.
+
+    Два поля, а не одно: «в составе» и «моя заявка» — разные факты, и при
+    `capacity = 1` они взаимоисключающие (до решения автора заявитель не
+    участник). Слить их в один флаг значило бы потерять различие, на котором
+    держатся оба действия UI («Отменить участие» против «Отменить заявку»).
+    """
+
+    participating: frozenset[int]
+    pending: dict[int, uuid_lib.UUID]
+
+
 class JoinRequestRepository:
     """Запросы к `join_requests` и чтение карточки для правил подачи."""
 
@@ -40,11 +67,11 @@ class JoinRequestRepository:
 
     @staticmethod
     def build_get_for_request_statement(
-        card_uuid: uuid_lib.UUID, community_slug: str
+        card_uuid: uuid_lib.UUID, city_slug: str
     ) -> Select[Any]:
         """AC-07 (ADR-13): карточка для подачи заявки — с срезом сообщества.
 
-        `community_slug` обязателен в SQL, а не в `if` после выборки: карточка
+        `city_slug` обязателен в SQL, а не в `if` после выборки: карточка
         чужого сообщества должна быть НЕОТЛИЧИМА от несуществующей (`404` с тем
         же телом). Проверка после выборки забывается при первом рефакторинге —
         тот же класс дефекта, что `place_id` без среза сообщества в 3.3.
@@ -59,7 +86,7 @@ class JoinRequestRepository:
         """
         return select(EventCard).where(
             EventCard.uuid == card_uuid,
-            EventCard.community_slug == community_slug,
+            EventCard.city_slug == city_slug,
         )
 
     @staticmethod
@@ -88,7 +115,7 @@ class JoinRequestRepository:
 
     @staticmethod
     def build_cancel_statement(
-        request_uuid: uuid_lib.UUID, applicant_id: int, community_slug: str
+        request_uuid: uuid_lib.UUID, applicant_id: int, city_slug: str
     ) -> Any:
         """AC-01, AC-04, AC-05: CAS-отмена `pending -> cancelled` одним `UPDATE`.
 
@@ -101,9 +128,9 @@ class JoinRequestRepository:
         `applicant_id` в предикате, а не в `if` после выборки (AC-04,
         ADR-13): чужая заявка обязана быть НЕОТЛИЧИМА от несуществующей, а
         проверка после выборки забывается при первом рефакторинге (класс
-        дефекта `community_slug` в 3.3).
+        дефекта `city_slug` в 3.3).
 
-        `community_slug` — подзапросом, а не `UPDATE ... FROM`: карточка
+        `city_slug` — подзапросом, а не `UPDATE ... FROM`: карточка
         чужого сообщества не должна отменяться (ADR-01/ADR-13), и подзапрос
         читается как отдельный фильтр, не смешиваясь с `SET`.
 
@@ -111,7 +138,7 @@ class JoinRequestRepository:
         и момент решения обязан быть (D-5a.1-6). `CHECK` на это намеренно
         не ставится, поэтому единственный рубеж — этот `SET`.
         """
-        card_ids = select(EventCard.id).where(EventCard.community_slug == community_slug)
+        card_ids = select(EventCard.id).where(EventCard.city_slug == city_slug)
         return (
             update(JoinRequest)
             .where(
@@ -125,7 +152,7 @@ class JoinRequestRepository:
 
     @staticmethod
     def build_status_lookup_statement(
-        request_uuid: uuid_lib.UUID, applicant_id: int, community_slug: str
+        request_uuid: uuid_lib.UUID, applicant_id: int, city_slug: str
     ) -> Select[Any]:
         """AC-04, AC-05: статус СВОЕЙ заявки — только для диагностики отказа.
 
@@ -138,7 +165,7 @@ class JoinRequestRepository:
         строку, которую CAS не мог тронуть, и `404` подменялся бы `409`
         на чужой заявке.
         """
-        card_ids = select(EventCard.id).where(EventCard.community_slug == community_slug)
+        card_ids = select(EventCard.id).where(EventCard.city_slug == city_slug)
         return select(JoinRequest.status).where(
             JoinRequest.uuid == request_uuid,
             JoinRequest.applicant_id == applicant_id,
@@ -151,7 +178,7 @@ class JoinRequestRepository:
     def build_my_requests_page_statement(
         *,
         applicant_id: int,
-        community_slug: str,
+        city_slug: str,
         after: tuple[datetime, uuid_lib.UUID] | None,
         limit: int,
     ) -> Select[Any]:
@@ -192,6 +219,8 @@ class JoinRequestRepository:
                 User.uuid.label("author_uuid"),
                 Profile.name.label("author_name"),
                 Profile.age.label("author_age"),
+                # Стори 12.2, AC-3: возраст вычисляется сервисом.
+                Profile.birth_date.label("author_birth_date"),
             )
             .join(EventCard, EventCard.id == JoinRequest.card_id)
             .join(User, User.id == EventCard.author_id)
@@ -200,7 +229,7 @@ class JoinRequestRepository:
             .where(
                 JoinRequest.applicant_id == applicant_id,
                 JoinRequest.status.in_(JOIN_REQUEST_VISIBLE_STATUSES),
-                EventCard.community_slug == community_slug,
+                EventCard.city_slug == city_slug,
             )
         )
         if after is not None:
@@ -215,7 +244,7 @@ class JoinRequestRepository:
         )
 
     @staticmethod
-    def build_my_requests_count_statement(*, applicant_id: int, community_slug: str) -> Select[Any]:
+    def build_my_requests_count_statement(*, applicant_id: int, city_slug: str) -> Select[Any]:
         """AC-06, D-5a.3-7: `total` — БЕЗ курсора и без JOIN'ов к `places`/`profiles`.
 
         Курсор — позиция чтения, а не фильтр: `total` с курсором уменьшался бы
@@ -233,7 +262,7 @@ class JoinRequestRepository:
             .where(
                 JoinRequest.applicant_id == applicant_id,
                 JoinRequest.status.in_(JOIN_REQUEST_VISIBLE_STATUSES),
-                EventCard.community_slug == community_slug,
+                EventCard.city_slug == city_slug,
             )
         )
 
@@ -287,10 +316,11 @@ class JoinRequestRepository:
     def build_card_requests_page_statement(
         *,
         card_id: int,
-        community_slug: str,
+        city_slug: str,
         statuses: tuple[JoinRequestStatus, ...],
         after: tuple[datetime, uuid_lib.UUID] | None,
         limit: int,
+        within_bounds: Any | None = None,
     ) -> Select[Any]:
         """AC-01, AC-04: страница заявившихся на карточку — в порядке очереди.
 
@@ -320,6 +350,23 @@ class JoinRequestRepository:
                 User.uuid.label("applicant_uuid"),
                 Profile.name.label("applicant_name"),
                 Profile.age.label("applicant_age"),
+                # Стори 12.2, AC-3: возраст вычисляется сервисом.
+                Profile.birth_date.label("applicant_birth_date"),
+                # AC-3 стори 12.6 (FR119): пол заявителя — источник сравнения
+                # рамки. До 12.6 это поле НЕ селектилось (M-11), и без него
+                # пол заявителя пришлось бы читать вторым запросом на каждую
+                # страницу.
+                User.gender.label("applicant_gender"),
+                # AC-3: попадание в рамки автора. Выражение приходит
+                # ПАРАМЕТРОМ из сервиса — один объект на оба построителя
+                # (AC-5a). `None` — карточки без рамок не читают подзапрос
+                # вовсе, и в ответе поле будет `None`, а не «истина»:
+                # рамок нет ⇒ проверять нечего (см. сборку `CardRequestsEntry`).
+                (
+                    within_bounds.label("within_bounds")
+                    if within_bounds is not None
+                    else sql_cast(null(), Boolean).label("within_bounds")
+                ),
             )
             .join(User, User.id == JoinRequest.applicant_id)
             .outerjoin(Profile, Profile.user_id == User.id)
@@ -327,7 +374,7 @@ class JoinRequestRepository:
                 JoinRequest.card_id == card_id,
                 JoinRequest.status.in_(statuses),
                 JoinRequest.card_id.in_(
-                    select(EventCard.id).where(EventCard.community_slug == community_slug)
+                    select(EventCard.id).where(EventCard.city_slug == city_slug)
                 ),
             )
         )
@@ -364,11 +411,11 @@ class JoinRequestRepository:
     # ——— операции ———
 
     async def get_card_for_request(
-        self, card_uuid: uuid_lib.UUID, community_slug: str
+        self, card_uuid: uuid_lib.UUID, city_slug: str
     ) -> EventCard | None:
         """AC-07: карточка сообщества или `None` (чужая == несуществующая)."""
         result = await self._session.execute(
-            self.build_get_for_request_statement(card_uuid, community_slug)
+            self.build_get_for_request_statement(card_uuid, city_slug)
         )
         # `scalar_one_or_none()` на `Select[Any]` даёт `Any`; явная переменная
         # возвращает тип для mypy-strict и делает приведение видимым.
@@ -381,7 +428,7 @@ class JoinRequestRepository:
         return int(result.scalar_one())
 
     async def cancel_own_pending(
-        self, request_uuid: uuid_lib.UUID, applicant_id: int, community_slug: str
+        self, request_uuid: uuid_lib.UUID, applicant_id: int, city_slug: str
     ) -> bool:
         """AC-01, AC-04, AC-05: CAS-отмена; `True` — ровно одна строка изменена.
 
@@ -391,7 +438,7 @@ class JoinRequestRepository:
         статуса (Task 2.4), и только на этом пути.
         """
         result = await self._session.execute(
-            self.build_cancel_statement(request_uuid, applicant_id, community_slug)
+            self.build_cancel_statement(request_uuid, applicant_id, city_slug)
         )
         # `CursorResult`, а не `Result`: `rowcount` есть только у курсора, а
         # `AsyncSession.execute` типизирован как `Result` — берём фактический
@@ -399,7 +446,7 @@ class JoinRequestRepository:
         return bool(cast("CursorResult[Any]", result).rowcount == 1)
 
     async def get_own_status(
-        self, request_uuid: uuid_lib.UUID, applicant_id: int, community_slug: str
+        self, request_uuid: uuid_lib.UUID, applicant_id: int, city_slug: str
     ) -> str | None:
         """AC-04, AC-05: статус своей заявки или `None` (нет/чужая/чужое сообщество).
 
@@ -409,7 +456,7 @@ class JoinRequestRepository:
         `REQUEST_NOT_ACTIVE` (консервативно), а не `AttributeError` → `500`.
         """
         result = await self._session.execute(
-            self.build_status_lookup_statement(request_uuid, applicant_id, community_slug)
+            self.build_status_lookup_statement(request_uuid, applicant_id, city_slug)
         )
         status: str | None = result.scalar_one_or_none()
         return status
@@ -418,7 +465,7 @@ class JoinRequestRepository:
         self,
         *,
         applicant_id: int,
-        community_slug: str,
+        city_slug: str,
         after: tuple[datetime, uuid_lib.UUID] | None,
         limit: int,
     ) -> list[Any]:
@@ -432,7 +479,7 @@ class JoinRequestRepository:
         result = await self._session.execute(
             self.build_my_requests_page_statement(
                 applicant_id=applicant_id,
-                community_slug=community_slug,
+                city_slug=city_slug,
                 after=after,
                 limit=limit,
             )
@@ -443,10 +490,11 @@ class JoinRequestRepository:
         self,
         *,
         card_id: int,
-        community_slug: str,
+        city_slug: str,
         statuses: tuple[JoinRequestStatus, ...],
         after: tuple[datetime, uuid_lib.UUID] | None,
         limit: int,
+        within_bounds: Any | None = None,
     ) -> list[Any]:
         """AC-01, AC-04: строки страницы заявившихся.
 
@@ -457,10 +505,11 @@ class JoinRequestRepository:
         result = await self._session.execute(
             self.build_card_requests_page_statement(
                 card_id=card_id,
-                community_slug=community_slug,
+                city_slug=city_slug,
                 statuses=statuses,
                 after=after,
                 limit=limit,
+                within_bounds=within_bounds,
             )
         )
         return list(result.all())
@@ -474,17 +523,17 @@ class JoinRequestRepository:
         )
         return int(result.scalar_one())
 
-    async def count_my_requests(self, *, applicant_id: int, community_slug: str) -> int:
+    async def count_my_requests(self, *, applicant_id: int, city_slug: str) -> int:
         """AC-06: `total` без курсора (листание его не меняет)."""
         result = await self._session.execute(
             self.build_my_requests_count_statement(
-                applicant_id=applicant_id, community_slug=community_slug
+                applicant_id=applicant_id, city_slug=city_slug
             )
         )
         return int(result.scalar_one())
 
     async def get_card_for_join(
-        self, card_uuid: uuid_lib.UUID, community_slug: str
+        self, card_uuid: uuid_lib.UUID, city_slug: str
     ) -> EventCard | None:
         """AC-11 (ADR-13, стори 5а.5): карточка для мгновенного присоединения.
 
@@ -500,7 +549,7 @@ class JoinRequestRepository:
         строка актора (Task 3.1).
         """
         result = await self._session.execute(
-            self.build_get_for_request_statement(card_uuid, community_slug)
+            self.build_get_for_request_statement(card_uuid, city_slug)
         )
         card: EventCard | None = result.scalar_one_or_none()
         return card
@@ -620,8 +669,70 @@ class JoinRequestRepository:
         )
 
     @staticmethod
+    def build_viewer_request_state_statement(
+        *, applicant_id: int, card_ids: list[int]
+    ) -> Select[Any]:
+        """AC-09 стори 5б.2 + AC-2 стори 11.5: оба признака зрителя ОДНИМ запросом.
+
+        Два отдельных `SELECT` (участие и заявка) нарушали контракт анти-оракула
+        (`test_oracle_exact_query_count`): число SQL на `GET /cards/{uuid}`
+        зафиксировано, и лишний запрос краснит его даже при верном JSON. Здесь
+        читаются обе роли сразу, разделение — в Python.
+
+        Предикат `status IN ('pending','selected')`, а не
+        `JOIN_REQUEST_OCCUPYING_STATUSES`: константа — про ЗАНЯТЫЕ МЕСТА, и её
+        изменение (например, добавление `cancelled`) молча переписало бы
+        семантику «моя заявка». Список задан явно теми двумя состояниями,
+        которые различает UI: `pending` → «Моя заявка» + отмена, `selected` →
+        участие (отмена заявки невозможна, `409 JoinRequestSelectedError`).
+
+        `uuid` возвращается только для `pending`: для `selected` действие
+        отмены заявки не существует, и лишний адрес в ответе дал бы клиенту
+        повод предложить несуществующее действие.
+        """
+        return cast(
+            Select[Any],
+            select(JoinRequest.card_id, JoinRequest.uuid, JoinRequest.status).where(
+                JoinRequest.applicant_id == applicant_id,
+                JoinRequest.status.in_(
+                    (JoinRequestStatus.PENDING.value, JoinRequestStatus.SELECTED.value)
+                ),
+                JoinRequest.card_id.in_(card_ids),
+            ),
+        )
+
+    async def viewer_request_state(
+        self, *, applicant_id: int, card_ids: list[int]
+    ) -> ViewerRequestState:
+        """AC-09 5б.2 + AC-2 11.5: роль зрителя по всем карточкам страницы.
+
+        Один `SELECT` на страницу (N+1 недопустим: 20 карточек дали бы 20
+        запросов на самый частый GET продукта). Возвращает два независимых
+        ответа из ОДНИХ строк: «в составе» (`selected`) и «моя заявка»
+        (`pending` + её `uuid`).
+        """
+        if not card_ids:
+            return ViewerRequestState(participating=frozenset(), pending={})
+        result = await self._session.execute(
+            self.build_viewer_request_state_statement(
+                applicant_id=applicant_id, card_ids=card_ids
+            )
+        )
+        participating: set[int] = set()
+        pending: dict[int, uuid_lib.UUID] = {}
+        for card_id, request_uuid, status in result.all():
+            # Явные ветви, а не `else`: предикат фильтрует ровно два статуса,
+            # и добавление третьего в фильтр обязано попасть сюда, а не молча
+            # стать «моей заявкой» с кнопкой отмены, которая вернёт `409`.
+            if status == JoinRequestStatus.SELECTED.value:
+                participating.add(int(card_id))
+            elif status == JoinRequestStatus.PENDING.value:
+                pending[int(card_id)] = request_uuid
+        return ViewerRequestState(participating=frozenset(participating), pending=pending)
+
+    @staticmethod
     def build_get_card_for_select_statement(
-        request_uuid: uuid_lib.UUID, community_slug: str
+        request_uuid: uuid_lib.UUID, city_slug: str
     ) -> Any:
         """AC-01, AC-04 стори 5б.2: карточка и `id` заявки — по `uuid` заявки.
 
@@ -630,7 +741,7 @@ class JoinRequestRepository:
         один запрос читает обе строки: `EventCard` + `JoinRequest.id` (нужен для
         `except_id` в reject-шаге).
 
-        `community_slug` — в SQL, а не в `if` после выборки (ADR-13): карточка
+        `city_slug` — в SQL, а не в `if` после выборки (ADR-13): карточка
         чужого сообщества обязана быть неотличима от несуществующей заявки,
         иначе перебором `uuid` можно было бы узнать о чужих карточках.
 
@@ -647,7 +758,7 @@ class JoinRequestRepository:
             .join(JoinRequest, JoinRequest.card_id == EventCard.id)
             .where(
                 JoinRequest.uuid == request_uuid,
-                EventCard.community_slug == community_slug,
+                EventCard.city_slug == city_slug,
             )
         )
 
@@ -722,7 +833,7 @@ class JoinRequestRepository:
         return select(JoinRequest.id).where(JoinRequest.uuid == request_uuid)
 
     async def get_card_for_select(
-        self, request_uuid: uuid_lib.UUID, community_slug: str
+        self, request_uuid: uuid_lib.UUID, city_slug: str
     ) -> tuple[EventCard, int, str] | None:
         """AC-01, AC-04, AC-05: карточка, `id` и СТАТУС заявки или `None`.
 
@@ -732,7 +843,7 @@ class JoinRequestRepository:
         предикате стоил бы лишнего round-trip на горячем пути.
         """
         result = await self._session.execute(
-            self.build_get_card_for_select_statement(request_uuid, community_slug)
+            self.build_get_card_for_select_statement(request_uuid, city_slug)
         )
         row = result.first()
         if row is None:
@@ -804,8 +915,104 @@ class JoinRequestRepository:
 
     # ——— 5б.3: автовыбор первого по истечении окна (AC-01, AC-05) ———
 
+    # ——— 12.6: единый предикат рамок аудитории (AC-3 + AC-5) ———
+
     @staticmethod
-    def build_first_pending_statement(*, card_id: int) -> Any:
+    def build_within_bounds_predicate(
+        *,
+        gender_filter: str | None,
+        age_min: int | None,
+        age_max: int | None,
+    ) -> Any:
+        """AC-3 + AC-5 стори 12.6 (FR119, FR126, ADR-19): попадает ли заявитель в рамки.
+
+        **Один предикат на два вопроса.** `within_bounds` в списке автора
+        (AC-3) и фильтр автовыбора (AC-5) — это ОДИН вопрос: «проходит ли
+        заявитель рамки карточки». Две реализации (Python для отображения,
+        SQL для `first_pending`) разошлись бы молча: автор видел бы «вне
+        рамок» у того, кого система выбрала, или наоборот. Поэтому выражение
+        строится здесь один раз и передаётся ПАРАМЕТРОМ в оба построителя
+        (`build_card_requests_page_statement` → `SELECT ... AS within_bounds`,
+        `build_first_pending_statement` → `WHERE`).
+
+        **Почему SQL, а не Python.** `Profile.age` — legacy-fallback для
+        40 008 учёток без даты рождения, а у остальных возраст вычисляется из
+        `birth_date` (`age_service.compute_age`, 12.2). В SQL правило
+        записано один раз — `COALESCE(возраст_из_даты, age)`, — и работает
+        без выгрузки строк в память. Python-вариант потребовал бы LEFT JOIN
+        анкеты (её может не быть) и второй копии `compute_age`.
+
+        **Возраст на `submitted_at`, а не на `now()`** (FR126): рамка
+        проверяется на момент подачи заявки. Заявка, поданная в день
+        18-летия, проходит `age_min = 18` — `age()` в PostgreSQL считает
+        полные годы так же, как `compute_age` (день рождения уже наступил).
+        Считать на `now()` значило бы, что один и тот же список меняет
+        `within_bounds` от прогона к прогону без единого события.
+
+        **Неизвестный возраст ⇒ `false`.** Если нет ни `birth_date`, ни
+        legacy `age`, `COALESCE` даёт `NULL`, а `NULL >= age_min` — тоже
+        `NULL`, то есть не `TRUE`. Предикат требует явного `IS NOT NULL`:
+        «не доказано, что в рамках» — это «вне рамок», а не «проходит».
+        Обратное решение (трактовать `NULL` как «подходит») пропустило бы
+        к выбору участника, о возрасте которого не известно ничего.
+
+        **Пол берётся из `users.gender`** — того же поля, на которое
+        ссылается составной FK `profiles (user_id, gender)` (CR 2.1,
+        Решение 1): второго источника правды нет. `NULL` у заявителя при
+        заданном `gender_filter` даёт `NULL`, то есть «не проходит».
+
+        `race` параметров, а не колонок `event_cards`: предикат обязан
+        работать и там, где `event_cards` в запросе нет
+        (`build_first_pending_statement` выбирает только из `join_requests`).
+        """
+        # Возраст заявителя на момент подачи. Подзапрос коррелирован по
+        # `join_requests.applicant_id`: планшетный JOIN к `users`/`profiles`
+        # здесь не годится — построитель `first_pending` их не содержит, и
+        # предикат перестал бы быть переносимым между двумя запросами.
+        applicant_age = (
+            select(
+                func.coalesce(
+                    func.extract("year", func.age(JoinRequest.submitted_at, Profile.birth_date)),
+                    Profile.age,
+                )
+            )
+            .select_from(User)
+            .outerjoin(Profile, Profile.user_id == User.id)
+            .where(User.id == JoinRequest.applicant_id)
+            # `correlate_except` обязателен: без него SQLAlchemy
+            # авто-коррелирует ВСЕ таблицы запроса, и в `first_pending` (где
+            # `users`/`profiles` нет в FROM) подзапрос остаётся без источника
+            # → `InvalidRequestError: returned no FROM clauses due to
+            # auto-correlation`. Воспроизведено тестом
+            # `test_gender_filter_marks_outsider`.
+            .correlate_except(User, Profile)
+            .scalar_subquery()
+        )
+
+        applicant_gender = (
+            select(User.gender)
+            .where(User.id == JoinRequest.applicant_id)
+            .correlate_except(User)
+            .scalar_subquery()
+        )
+
+        predicates: list[Any] = [
+            # AC-1a/AC-1a-следствие: «неизвестный возраст — не доказано».
+            applicant_age.is_not(None)
+        ]
+        if gender_filter is not None:
+            # AC-1b: рамка по полу задана — сравниваем с `users.gender`.
+            predicates.append(applicant_gender == gender_filter)
+        if age_min is not None:
+            # AC-1a: полуоткрытая пара «от 30, без верхней» — легальна.
+            predicates.append(applicant_age >= age_min)
+        if age_max is not None:
+            predicates.append(applicant_age <= age_max)
+
+        return and_(*predicates)
+
+    @staticmethod
+    def build_first_pending_statement(*, card_id: int, within_bounds: Any | None = None) -> Any:
         """AC-01 стори 5б.3 (FR80, ADR-05): первая `pending` заявка карточки.
 
         `ORDER BY submitted_at ASC, id ASC` — порядок ADR-05 дословно. Второй
@@ -830,8 +1037,16 @@ class JoinRequestRepository:
         Индекс `ix_join_requests_card_queue (card_id, submitted_at, id)
         WHERE status='pending'` — ровно ключ этого запроса; миграция не
         нужна (D-5b.3-7).
+
+        **`within_bounds` (AC-5 стори 12.6, FR119).** Необязательный параметр,
+        а не новый метод: второй метод дал бы второй порядок очереди и
+        разошёлся бы с этим при первой правке (класс `first()` из CR 5а.6).
+        Выражение приходит ОДНИМ объектом из
+        `build_within_bounds_predicate` — того же, что считает
+        `within_bounds` в списке автора (AC-5a). `None` — карточка без рамок,
+        фильтровать нечего (поведение 5б.3 не меняется).
         """
-        return (
+        statement = (
             select(JoinRequest.uuid, JoinRequest.id, JoinRequest.applicant_id)
             .where(
                 JoinRequest.card_id == card_id,
@@ -840,8 +1055,16 @@ class JoinRequestRepository:
             .order_by(JoinRequest.submitted_at, JoinRequest.id)
             .limit(1)
         )
+        if within_bounds is not None:
+            # AC-5: автовыбор видит ТОЛЬКО прошедших рамки. Заявки «вне
+            # рамок» остаются `pending` и получают `not_selected` от
+            # `reject_pending`, если выбор всё-таки состоялся.
+            statement = statement.where(within_bounds)
+        return statement
 
-    async def first_pending(self, *, card_id: int) -> tuple[uuid_lib.UUID, int, int] | None:
+    async def first_pending(
+        self, *, card_id: int, within_bounds: Any | None = None
+    ) -> tuple[uuid_lib.UUID, int, int] | None:
         """AC-01: `(uuid, id, applicant_id)` первой `pending` заявки или `None`.
 
         `uuid` возвращается вместе с `id`: `select_request` (5б.2) адресует
@@ -853,7 +1076,9 @@ class JoinRequestRepository:
         для проверки состава в тестах через отдельный запрос, а в structlog
         и ответы попадает лишь `card_uuid`.
         """
-        result = await self._session.execute(self.build_first_pending_statement(card_id=card_id))
+        result = await self._session.execute(
+            self.build_first_pending_statement(card_id=card_id, within_bounds=within_bounds)
+        )
         row = result.first()
         return None if row is None else (row[0], int(row[1]), int(row[2]))
 

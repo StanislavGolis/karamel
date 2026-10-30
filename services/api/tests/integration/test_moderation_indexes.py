@@ -46,7 +46,7 @@ async def test_card_queue_uses_index_without_sort(session: AsyncSession) -> None
         await session.execute(
             text(
                 "INSERT INTO users (provider, provider_user_id, phone, role, status, gender, "
-                "age_confirmed, consent_given_at, community_slug) "
+                "age_confirmed, consent_given_at, city_slug) "
                 "VALUES ('phone', :pid, :pid, 'user', 'active', 'male', true, "
                 "now(), 'tomsk') RETURNING id"
             ),
@@ -58,7 +58,7 @@ async def test_card_queue_uses_index_without_sort(session: AsyncSession) -> None
     place_id = (
         await session.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:name, 'cafe', 'пр. Ленина, 1', 'tomsk', true) RETURNING id"
             ),
             {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -68,12 +68,13 @@ async def test_card_queue_uses_index_without_sort(session: AsyncSession) -> None
     # 10 000 `pending` карточек одной вставкой: `generate_series` быстрее цикла.
     await session.execute(
         text(
-            "INSERT INTO event_cards (uuid, author_id, place_id, community_slug, title, category, "
+            "INSERT INTO event_cards (uuid, author_id, place_id, city_slug, title, category, "
             "starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "verification_status, filled_count, created_at) "
+            "verification_status, filled_count, created_at, kind, activity) "
             "SELECT gen_random_uuid(), :author, :place, 'tomsk', 'Карточка ' || g, 'cafe', "
             "now() + interval '3 days', 2, 2880, now() + interval '1 day', 'draft', "
-            "'pending', 0, now() - (g || ' seconds')::interval "
+            "'pending', 0, now() - (g || ' seconds')::interval, "
+            "'company', 'other' "
             "FROM generate_series(1, :rows) AS g"
         ),
         {"author": author_id, "place": place_id, "rows": ROWS},
@@ -108,7 +109,7 @@ async def test_photo_queue_uses_index_without_sort(session: AsyncSession) -> Non
     await session.execute(
         text(
             "INSERT INTO users (provider, provider_user_id, phone, role, status, gender, "
-            "age_confirmed, consent_given_at, community_slug) "
+            "age_confirmed, consent_given_at, city_slug) "
             "SELECT 'phone', '+7990' || lpad(g::text, 7, '0'), '+7990' || lpad(g::text, 7, '0'), "
             "'user', 'active', 'male', true, now(), 'tomsk' "
             "FROM generate_series(1, :rows) AS g"
@@ -170,7 +171,7 @@ async def test_keyset_pagination_covers_all_rows_with_equal_timestamps(
         await session.execute(
             text(
                 "INSERT INTO users (provider, provider_user_id, phone, role, status, gender, "
-                "age_confirmed, consent_given_at, community_slug) "
+                "age_confirmed, consent_given_at, city_slug) "
                 "VALUES ('phone', :pid, :pid, 'user', 'active', 'male', true, "
                 "now(), 'tomsk') RETURNING id"
             ),
@@ -180,7 +181,7 @@ async def test_keyset_pagination_covers_all_rows_with_equal_timestamps(
     place_id = (
         await session.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:name, 'cafe', 'пр. Ленина, 1', 'tomsk', true) RETURNING id"
             ),
             {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -195,12 +196,13 @@ async def test_keyset_pagination_covers_all_rows_with_equal_timestamps(
     fixed_created = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
     await session.execute(
         text(
-            "INSERT INTO event_cards (uuid, author_id, place_id, community_slug, title, category, "
+            "INSERT INTO event_cards (uuid, author_id, place_id, city_slug, title, category, "
             "starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "verification_status, filled_count, created_at) "
+            "verification_status, filled_count, created_at, kind, activity) "
             "SELECT gen_random_uuid(), :author, :place, 'tomsk', 'Карточка ' || g, 'cafe', "
             "now() + interval '3 days', 2, 2880, now() + interval '1 day', 'draft', "
-            "'pending', 0, :created "
+            "'pending', 0, :created, "
+            "'company', 'other' "
             "FROM generate_series(1, 7) AS g"
         ),
         {"author": author_id, "place": place_id, "created": fixed_created},

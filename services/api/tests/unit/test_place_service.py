@@ -8,7 +8,7 @@
 §18.3: гонку двух вставок в одной сессии доказать нельзя. Поэтому
 `IntegrityError` подменяется исключением драйвера с именем ограничения —
 проверяется ветка обработки, а сама уникальность держится
-`uq_places_community_name` (интеграционные тесты).
+`uq_places_city_name` (интеграционные тесты).
 """
 
 from __future__ import annotations
@@ -105,25 +105,25 @@ class _FakeRepository:
     def add(self, place: Any) -> None:
         self._session.add(place)
 
-    async def exists_in_community(self, community_slug: str, name: str) -> bool:
-        type(self).checked.append((community_slug, name))
+    async def exists_in_city(self, city_slug: str, name: str) -> bool:
+        type(self).checked.append((city_slug, name))
         return type(self).exists_result
 
-    async def find_by_community_and_name(self, community_slug: str, name: str) -> Any:
+    async def find_by_city_and_name(self, city_slug: str, name: str) -> Any:
         """Стори 3.2 (AC-03, D-6): существующее место с этим именем.
 
         Возвращается строка, а не `bool`: сервису нужен `is_active`, чтобы
         отличить активный дубль (`PLACE_DUPLICATE`) от скрытого
         (`PLACE_ARCHIVED` + `existing_uuid`).
         """
-        type(self).checked.append((community_slug, name))
+        type(self).checked.append((city_slug, name))
         return type(self).found_place
 
-    async def exists_in_community_excluding(
-        self, community_slug: str, name: str, exclude_uuid: Any
+    async def exists_in_city_excluding(
+        self, city_slug: str, name: str, exclude_uuid: Any
     ) -> Any:
         """Task 3.3 (AC-05): поиск дубля, не считая самого места."""
-        type(self).excluding_calls.append((community_slug, name, exclude_uuid))
+        type(self).excluding_calls.append((city_slug, name, exclude_uuid))
         return type(self).excluding_result
 
     async def list_page(self, **kwargs: Any) -> tuple[list[Any], int]:
@@ -169,7 +169,7 @@ def _patch_repository(monkeypatch: pytest.MonkeyPatch) -> None:
     """Подменяет репозиторий и `flush`, чтобы не поднимать БД.
 
     `flush` у фейковой сессии свой, но сервис создаёт объект через модель,
-    и без подмены репозитория `exists_in_community` пошёл бы в PostgreSQL.
+    и без подмены репозитория `exists_in_city` пошёл бы в PostgreSQL.
     """
     from app.services import place_service
 
@@ -179,14 +179,14 @@ def _patch_repository(monkeypatch: pytest.MonkeyPatch) -> None:
 def _session_with_settings(**overrides: Any) -> tuple[_FakeSession, Any]:
     """Собирает фейковую сессию и настройки сообщества.
 
-    `community_slugs` подменяются явно: тест не должен зависеть от `.env`
+    `city_slugs` подменяются явно: тест не должен зависеть от `.env`
     разработчика (там стендовый набор сообществ).
     """
     from app.core.config import settings as real_settings
 
     values = {
-        "community_slugs": ("tomsk", "kemerovo"),
-        "default_community_slug": "tomsk",
+        "city_slugs": ("tomsk", "kemerovo"),
+        "default_city_slug": "tomsk",
         **overrides,
     }
     return _FakeSession(), SimpleNamespace(**{**vars(real_settings), **values})
@@ -197,7 +197,7 @@ def _kwargs(**overrides: Any) -> dict[str, Any]:
         "name": "Кафе „Прага“",
         "category": PlaceCategory.CAFE,
         "address_text": "пр. Ленина, 1",
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
     }
     base.update(overrides)
     return base
@@ -206,10 +206,10 @@ def _kwargs(**overrides: Any) -> dict[str, Any]:
 # --- AC-03: сообщество из конфига ------------------------------------------------
 
 
-async def test_unknown_community_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_unknown_city_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC-03, ADR-01 «отвергнуто (б)»: слаг вне конфига — доменная ошибка.
 
-    Краснеет, если убрать сверку с `settings.community_slugs`: место легло бы
+    Краснеет, если убрать сверку с `settings.city_slugs`: место легло бы
     в «невидимое сообщество» (опечатка `tomsk` → `tomsk1`), и понять это по
     API невозможно — лента просто пустая.
     """
@@ -219,23 +219,23 @@ async def test_unknown_community_rejected(monkeypatch: pytest.MonkeyPatch) -> No
         await create_place(
             session,
             settings=settings,
-            **_kwargs(community_slug="tomsk1"),
+            **_kwargs(city_slug="tomsk1"),
         )
 
     assert session.added == []
 
 
-async def test_known_community_accepted() -> None:
+async def test_known_city_accepted() -> None:
     """AC-03: слаг из конфига проходит — сверка не блокирует легальный ввод.
 
-    Краснеет, если сверять с `default_community_slug` вместо списка: второе
+    Краснеет, если сверять с `default_city_slug` вместо списка: второе
     сообщество (после расширения пилота) стало бы недоступным.
     """
     session, settings = _session_with_settings()
 
-    place = await create_place(session, settings=settings, **_kwargs(community_slug="kemerovo"))
+    place = await create_place(session, settings=settings, **_kwargs(city_slug="kemerovo"))
 
-    assert place.community_slug == "kemerovo"
+    assert place.city_slug == "kemerovo"
 
 
 # --- AC-01: нормализация до вставки ---------------------------------------------
@@ -281,7 +281,7 @@ async def test_blank_name_rejected_before_insert() -> None:
 async def test_duplicate_detected_on_cheap_path() -> None:
     """AC-04, D-4: найденный дубль — `PlaceDuplicateError` с кодом `PLACE_DUPLICATE`.
 
-    Краснеет, если убрать проверку `exists_in_community`: пользователь получил
+    Краснеет, если убрать проверку `exists_in_city`: пользователь получил
     бы исключение драйвера (`500`) вместо понятного `409` в 3.2.
     """
     _FakeRepository.found_place = _place()
@@ -324,7 +324,7 @@ def _asyncpg_integrity_error(constraint: str, *, sqlstate: str = "23505") -> Int
             self.orig = inner
             self.sqlstate = state
             self.pgcode = state
-            self.detail = "Key (community_slug, name) already exists."
+            self.detail = "Key (city_slug, name) already exists."
 
     inner = _InnerDriverError(constraint, sqlstate)
 
@@ -336,11 +336,11 @@ async def test_duplicate_detected_from_integrity_error() -> None:
 
     Краснеет, если не обрабатывать `IntegrityError` ИЛИ если имя ограничения
     искать не там, где его кладёт asyncpg: вторая параллельная вставка
-    отбивается `uq_places_community_name` уже после того, как
-    `exists_in_community` вернул `False`, и админ получил бы `500`.
+    отбивается `uq_places_city_name` уже после того, как
+    `exists_in_city` вернул `False`, и админ получил бы `500`.
     """
     session, settings = _session_with_settings()
-    session.flush_error = _asyncpg_integrity_error("uq_places_community_name")
+    session.flush_error = _asyncpg_integrity_error("uq_places_city_name")
 
     with pytest.raises(PlaceDuplicateError) as excinfo:
         await create_place(session, settings=settings, **_kwargs())
@@ -352,7 +352,7 @@ async def test_foreign_integrity_error_is_not_masked_as_duplicate() -> None:
     """AC-04, Task 6.4: чужое нарушение целостности не превращается в дубль.
 
     Краснеет, если ловить любой `IntegrityError`: нарушение `ck_places_category`
-    или `ck_places_community_slug` показывалось бы админу как «такое место
+    или `ck_places_city_slug` показывалось бы админу как «такое место
     уже есть», и он искал бы несуществующий дубль вместо кривого слага.
     """
     session, settings = _session_with_settings()
@@ -460,16 +460,16 @@ async def test_invalid_category_code_is_constant_and_carries_allowed_list() -> N
     assert session.added == []
 
 
-async def test_string_community_slugs_rejected() -> None:
+async def test_string_city_slugs_rejected() -> None:
     """CR 3.1, патч 5: строка вместо последовательности — `TypeError`, не подстрока.
 
     §18.1: краснеет без рантайм-гарда. `"toms" in "tomsk"` истинно (проверено),
     поэтому место создавалось бы в несуществующем сообществе `toms`.
     """
-    session, settings = _session_with_settings(community_slugs="tomsk")
+    session, settings = _session_with_settings(city_slugs="tomsk")
 
     with pytest.raises(TypeError):
-        await create_place(session, settings=settings, **_kwargs(community_slug="toms"))
+        await create_place(session, settings=settings, **_kwargs(city_slug="toms"))
 
     assert session.added == []
 
@@ -485,7 +485,7 @@ def _place(name: str = "Кафе „Прага“", *, is_active: bool = True) -
         name=name,
         category="cafe",
         address_text="пр. Ленина, 1",
-        community_slug="tomsk",
+        city_slug="tomsk",
     )
     place.is_active = is_active
     return place
@@ -665,7 +665,7 @@ async def test_update_duplicate_race_is_domain_error() -> None:
     from app.services.place_service import update_place
 
     session, settings = _session_with_settings()
-    session.flush_error = _asyncpg_integrity_error("uq_places_community_name")
+    session.flush_error = _asyncpg_integrity_error("uq_places_city_name")
     place = _place()
 
     with pytest.raises(PlaceDuplicateError):
@@ -908,11 +908,11 @@ async def test_update_assigns_fields_inside_savepoint() -> None:
     assert updated.name == "Новое имя"
 
 
-async def test_update_duplicate_race_reads_community_before_savepoint() -> None:
+async def test_update_duplicate_race_reads_city_before_savepoint() -> None:
     """CR 3.2, патч 6 (AC-03): лог гонки не читает объект после отката SAVEPOINT.
 
     §18.1: краснеет от отката патча 6. После отката SAVEPOINT объект
-    экспирится, и `place.community_slug` в `except` давал `MissingGreenlet`
+    экспирится, и `place.city_slug` в `except` давал `MissingGreenlet`
     (ленивая подгрузка в async вне greenlet) — `409 PLACE_DUPLICATE`
     превращался в `500` (проверено исполнением на живом PostgreSQL).
     """
@@ -921,7 +921,7 @@ async def test_update_duplicate_race_reads_community_before_savepoint() -> None:
     session, settings = _session_with_settings()
     place = _place()
     # Сессия-заглушка: `flush` внутри SAVEPOINT падает нарушением уникальности.
-    session.flush_error = _asyncpg_integrity_error("uq_places_community_name")
+    session.flush_error = _asyncpg_integrity_error("uq_places_city_name")
 
     with pytest.raises(PlaceDuplicateError):
         await update_place(session, place=place, changes={"name": "Занятое имя"}, settings=settings)
@@ -944,35 +944,35 @@ def _row(*, minutes: int, place_uuid: Any | None = None) -> Any:
     )
 
 
-async def test_list_uses_default_community_slug_from_settings() -> None:
+async def test_list_uses_default_city_slug_from_settings() -> None:
     """AC-01: слаг берётся из конфига, а не из запроса.
 
-    §18.1: краснеет, если заменить `settings.default_community_slug` на
+    §18.1: краснеет, если заменить `settings.default_city_slug` на
     литерал или на аргумент функции — клиент смог бы запросить чужое
     сообщество, а в пилоте их несколько (`tomsk`, `kemerovo`).
     """
     from app.services.place_service import list_places
 
-    session, settings = _session_with_settings(default_community_slug="kemerovo")
+    session, settings = _session_with_settings(default_city_slug="kemerovo")
     _FakeRepository.page_items = [_row(minutes=0)]
     _FakeRepository.page_total = 1
 
     await list_places(session, settings=settings)
 
-    assert _FakeRepository.page_calls[0]["community_slug"] == "kemerovo"
+    assert _FakeRepository.page_calls[0]["city_slug"] == "kemerovo"
 
 
 async def test_list_rejects_slug_outside_config() -> None:
-    """AC-01: слаг из конфига обязан входить в `community_slugs`.
+    """AC-01: слаг из конфига обязан входить в `city_slugs`.
 
-    §18.1: краснеет, если убрать сверку. Опечатка в `DEFAULT_COMMUNITY_SLUG`
+    §18.1: краснеет, если убрать сверку. Опечатка в `DEFAULT_CITY_SLUG`
     дала бы молча пустую ленту вместо отказа, и «в сообществе нет мест»
     стало бы неотличимо от ошибки конфигурации.
     """
     from app.services.place_service import PlaceUnknownCommunityError, list_places
 
     session, settings = _session_with_settings(
-        community_slugs=("tomsk",), default_community_slug="kemerovo"
+        city_slugs=("tomsk",), default_city_slug="kemerovo"
     )
 
     with pytest.raises(PlaceUnknownCommunityError):
@@ -1127,15 +1127,15 @@ async def test_list_does_not_commit() -> None:
     assert session.commits == 0
 
 
-async def test_list_string_community_slugs_rejected() -> None:
+async def test_list_string_city_slugs_rejected() -> None:
     """CR 3.1, патч 5b: строка вместо последовательности слагов — `TypeError`.
 
     §18.1: краснеет, если убрать рантайм-гард. `in` по строке — поиск
-    ПОДСТРОКИ, и слаг `toms` прошёл бы проверку `community_slugs = "tomsk"`.
+    ПОДСТРОКИ, и слаг `toms` прошёл бы проверку `city_slugs = "tomsk"`.
     """
     from app.services.place_service import list_places
 
-    session, settings = _session_with_settings(community_slugs="tomsk")
+    session, settings = _session_with_settings(city_slugs="tomsk")
 
     with pytest.raises(TypeError):
         await list_places(session, settings=settings)

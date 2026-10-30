@@ -18,6 +18,10 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -26,6 +30,11 @@ import structlog
 
 import app.services.alert_service as alert_module
 from app.services.alert_service import send_alert
+
+# Корень пакета `api`: дочерний процесс в тесте AC-2 запускается с этим
+# `cwd`/`PYTHONPATH`, чтобы импорт `app.services.alert_service` был тем же,
+# что и у самого теста, а не зависел от каталога запуска pytest.
+API_ROOT = Path(__file__).resolve().parents[2]
 
 KEY = "alert:window_overdue:sent"
 TEXT = "window overdue: count=1"
@@ -247,6 +256,130 @@ async def test_disabled_alerting_is_logged_once_per_process(
     assert events.count("alert.disabled") == 1, (
         f"ожидалось одно событие alert.disabled за процесс, получено {events}"
     )
+    # AC-1.2 (стори 11.3): дежурный должен видеть, КАКОЙ ключ замолчал.
+    # Без проверки `key` запись «alert.disabled» без указания источника
+    # не отвечает на вопрос «что именно не алертит», и строка бесполезна.
+    assert captured[0]["key"] == KEY
+
+
+async def test_disabled_alerting_logs_once_per_1000_calls(
+    fake_redis: _FakeRedis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-4 (стори 11.3): 1000 вызовов за процесс → РОВНО одно `alert.disabled`.
+
+    **Почему 1000, а не 3.** probe зовёт `send_alert` раз в минуту: сутки — это
+    1440 вызовов. Тест на трёх проверяет только «флаг работает», но не объём —
+    дефект «логируем каждый N-й вызов» (например, `% 100 == 0`) на трёх вызовах
+    остался бы зелёным. 1000 — прокси суток: любой шаг дедупа, кроме «один раз
+    за процесс», даёт здесь больше одной строки.
+
+    **Что краснеет.** Убрать `if not _disabled_logged` (M1) — здесь будет 1000
+    событий. Не взводить флаг (M2) — тоже 1000. Запись НЕ через `logger`, а
+    напрямую в stderr, тест не увидит.
+    """
+    monkeypatch.setattr(alert_module.settings, "alert_telegram_bot_token", "")
+    monkeypatch.setattr(alert_module.settings, "alert_telegram_chat_id", "")
+    monkeypatch.setattr(alert_module, "_disabled_logged", False)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("при пустом токене POST не должен выполняться")
+
+    async with _client(handler) as client:
+        with structlog.testing.capture_logs() as captured:
+            for _ in range(1000):
+                sent = await send_alert(TEXT, key=KEY, redis=fake_redis, client=client)  # type: ignore[arg-type]
+                assert sent is False
+
+    events = [entry["event"] for entry in captured]
+    assert events.count("alert.disabled") == 1, (
+        f"1000 вызовов должны дать одну строку alert.disabled, получено {len(events)}"
+    )
+    # AC-4.2: выключенный алертинг не занимает окно дедупа в Redis — иначе
+    # после включения токена первые алерты молчали бы час из-за строк, которые
+    # никто не отправлял.
+    assert fake_redis.data == {}
+
+
+# Дочерний скрипт для проверки сброса флага НОВЫМ процессом.
+# Печатает в stderr только JSON-события structlog; постороннего вывода нет,
+# чтобы счётчик строк был однозначным.
+_FRESH_PROCESS_SCRIPT = """
+import asyncio
+import sys
+
+import structlog
+
+import app.services.alert_service as alert_module
+
+structlog.configure(
+    processors=[structlog.processors.JSONRenderer()],
+    logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+)
+alert_module.logger = structlog.get_logger("probe")
+alert_module.settings.alert_telegram_bot_token = ""
+alert_module.settings.alert_telegram_chat_id = ""
+
+
+class _NoRedis:
+    data: dict[str, str] = {}
+
+    async def set(self, *args, **kwargs):
+        return True
+
+
+async def main() -> None:
+    for _ in range(3):
+        await alert_module.send_alert("probe", key="alert:window_overdue:sent", redis=_NoRedis())
+
+
+asyncio.run(main())
+"""
+
+
+async def test_disabled_alerting_logged_again_in_fresh_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-2 (стори 11.3): новый процесс начинает с чистым флагом.
+
+    **Почему `subprocess`, а не `monkeypatch`.** Сброс модульного флага через
+    `importlib.reload` или `setattr` проверяет, что Python умеет присваивать
+    переменную, — но не проверяет главное утверждение AC-2: флаг НЕ переживает
+    перезапуск воркера. Это разрыв, на который указывает P-25 («гард проверяет
+    эффект, а не форму»): эффект здесь — строка на старте каждого процесса.
+
+    **Что краснеет.** Если флаг станет процессным состоянием вне модуля (файл,
+    Redis, `os.environ`) или если дедуп переедет в постоянное хранилище, второй
+    запуск даст ноль строк и тест покраснеет. При M1 (нет проверки флага)
+    каждый запуск даст три строки — тоже красный.
+
+    Redis, БД и сеть не нужны: `redis` — заглушка внутри скрипта, токен пуст.
+    """
+    script = tmp_path / "probe_fresh_process.py"
+    script.write_text(_FRESH_PROCESS_SCRIPT, encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(API_ROOT), "PYTHONDONTWRITEBYTECODE": "1"}
+
+    def run_probe() -> str:
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=API_ROOT,
+            capture_output=True,
+            check=False,
+            timeout=60,
+            env=env,
+        )
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        assert result.returncode == 0, f"дочерний процесс упал: {stderr}"
+        return stderr
+
+    first = run_probe()
+    second = run_probe()
+
+    for name, stderr in (("первый", first), ("второй", second)):
+        count = stderr.count("alert.disabled")
+        assert count == 1, (
+            f"{name} запуск должен дать ровно одну строку alert.disabled, "
+            f"получено {count}: {stderr}"
+        )
 
 
 async def test_alert_body_contains_no_personal_data(

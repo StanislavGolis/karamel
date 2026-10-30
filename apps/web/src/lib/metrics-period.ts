@@ -25,6 +25,37 @@ export const MAX_WINDOW_DAYS = 365;
 /** Окно по умолчанию: NFR6 говорит про «14-й день», значит и смотрят его. */
 export const DEFAULT_WINDOW_DAYS = 14;
 
+/**
+ * Нижняя граница окна в календарных месяцах — копия серверного `MIN_PERIOD_MONTHS`
+ * (стори 11.7, AC-1, AC-8).
+ *
+ * **Зачем дублировать.** Сервер отвечает `422 period_too_old` на окно, начатое
+ * раньше шести месяцев назад: ретенция уже удалила оттуда строки `attendance`,
+ * и метрика за такой период менялась бы при каждом прогоне. Без клампинга
+ * администратор увидел бы «не удалось загрузить метрики» — ложный сбой
+ * сервиса там, где дело в выбранной дате (P-26: AC без потребителя в UI —
+ * долг, а не выполнение).
+ */
+export const MIN_PERIOD_MONTHS = 6;
+
+/**
+ * Тот же момент, но `months` календарных месяцев назад, с клампом дня.
+ *
+ * Зеркало серверной `_months_ago` (`services/api/app/api/v1/metrics.py`):
+ * `2026-08-31 − 6 мес → 2026-02-28`, а не 3 марта. `setUTCMonth` сам переносит
+ * день через границу месяца, поэтому день выставляется явно.
+ */
+export function monthsAgo(moment: Date, months: number): Date {
+  const result = new Date(moment.getTime());
+  const targetMonth = result.getUTCMonth() - months;
+  // День целевого месяца: `Date.UTC(year, month + 1, 0)` — последний день месяца.
+  const lastDay = new Date(Date.UTC(result.getUTCFullYear(), targetMonth + 1, 0)).getUTCDate();
+  result.setUTCDate(1);
+  result.setUTCMonth(targetMonth);
+  result.setUTCDate(Math.min(moment.getUTCDate(), lastDay));
+  return result;
+}
+
 /** Пресеты окна. 42 дня — минимальное окно, в котором критерий отказа осмыслен. */
 export const WINDOW_PRESETS = [14, 42, 90] as const;
 
@@ -86,6 +117,20 @@ export function resolvePeriod(
     if (from.getTime() < to.getTime()) {
       const windowDays = Math.round((to.getTime() - from.getTime()) / MS_PER_DAY);
       if (windowDays <= MAX_WINDOW_DAYS) {
+        // AC-8 (11.7): окно, начатое раньше шести месяцев назад, сервер
+        // отвергает (`422 period_too_old`) — ретенция уже удалила оттуда
+        // `attendance`, и числа за такой период не пересчитать дважды
+        // одинаково. Не откат на дефолт (администратор увидел бы не то
+        // окно, которое выбрал), а КЛАМП начала до границы: выбирать
+        // «за пределами хранения» бессмысленно, а остальное окно валидно.
+        const boundary = periodFloor(now);
+        if (from.getTime() < boundary.getTime()) {
+          const clamped = build(boundary, to, 0, true);
+          return {
+            ...clamped,
+            windowDays: Math.round((to.getTime() - boundary.getTime()) / MS_PER_DAY),
+          };
+        }
         return build(from, to, windowDays, ignored);
       }
     }
@@ -105,6 +150,21 @@ export function resolvePeriod(
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const start = new Date(end.getTime() - days * MS_PER_DAY);
   return build(start, end, days, ignored);
+}
+
+/**
+ * Начало допустимого окна: `now − MIN_PERIOD_MONTHS` плюс сутки запаса.
+ *
+ * **Почему запас.** Сервер берёт `datetime.now(UTC)` в момент запроса, а эта
+ * функция — в момент рендера, то есть раньше. Без запаса `from` ровно на
+ * границе оказался бы на микросекунды СТАРШЕ серверной границы, и страница
+ * регулярно получала бы `422 period_too_old` на корректном окне. Сутки —
+ * наименьшая величина, незаметная на окне в 14+ дней и надёжно перекрывающая
+ * разницу между рендером и запросом.
+ */
+function periodFloor(now: Date): Date {
+  const boundary = monthsAgo(now, MIN_PERIOD_MONTHS);
+  return new Date(boundary.getTime() + MS_PER_DAY);
 }
 
 function build(from: Date, to: Date, windowDays: number, ignoredParams: boolean): MetricsPeriod {

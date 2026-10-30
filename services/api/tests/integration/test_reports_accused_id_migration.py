@@ -30,6 +30,8 @@ from alembic import command
 
 pytestmark = [
     pytest.mark.integration,
+    # Стори 12.9 (AC-4, W-11.4-d): DDL на общей схеме — несовместим с xdist.
+    pytest.mark.ddl,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
 
@@ -181,7 +183,7 @@ def _seed_legacy_report() -> tuple[str, str]:
                         "is_active) "
                         "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
                     ),
-                    {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+                    {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
                 )
                 place_id = int(place.scalar_one())
                 chat_uuid = uuid_lib.uuid4()
@@ -196,7 +198,7 @@ def _seed_legacy_report() -> tuple[str, str]:
                     {
                         "a": reporter_id,
                         "p": place_id,
-                        "s": settings.default_community_slug,
+                        "s": settings.default_city_slug,
                         "chat": chat_uuid,
                     },
                 )

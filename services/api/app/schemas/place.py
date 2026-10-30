@@ -28,10 +28,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.models.enums import PlaceCategory
 from app.services.profile_normalize import normalize_text
 
-# AC-03: тот же шаблон стоит в `ck_places_community_slug` и в
+# AC-03: тот же шаблон стоит в `ck_places_city_slug` и в
 # `Settings._COMMUNITY_SLUG_RE`. Расхождение дало бы `500` на сохранении:
 # Pydantic пропустил бы слаг, который PostgreSQL отвергает.
-COMMUNITY_SLUG_PATTERN = r"^[a-z0-9_-]{3,64}$"
+CITY_SLUG_PATTERN = r"^[a-z0-9_-]{3,64}$"
 
 # AC-01: пределы совпадают с шириной колонок `places`. Проверка на схеме,
 # а не только в БД: иначе слишком длинное значение падало бы `DBAPIError`-ом
@@ -55,9 +55,9 @@ def _normalize(value: object) -> object:
 class PlaceCreate(BaseModel):
     """AC-01, AC-03: вход создания места (подключит роутер 3.2).
 
-    `community_slug` обязателен: место без сообщества не видно ни в одной
-    ленте (`WHERE community_slug = ...` не совпадёт), и понять это по ответу
-    API невозможно. Значение сверяется сервисом с `Settings.community_slugs` —
+    `city_slug` обязателен: место без сообщества не видно ни в одной
+    ленте (`WHERE city_slug = ...` не совпадёт), и понять это по ответу
+    API невозможно. Значение сверяется сервисом с `Settings.city_slugs` —
     опечатка не создаёт «невидимое сообщество» (AC-03).
     """
 
@@ -71,7 +71,7 @@ class PlaceCreate(BaseModel):
     # (воркер, сырой SQL) дошёл бы до выдачи 3.3.
     category: PlaceCategory
     address_text: str = Field(min_length=1, max_length=ADDRESS_MAX_LENGTH)
-    community_slug: str = Field(pattern=COMMUNITY_SLUG_PATTERN)
+    city_slug: str = Field(pattern=CITY_SLUG_PATTERN)
 
     @field_validator("name", "address_text", mode="before")
     @classmethod
@@ -91,8 +91,8 @@ class PlaceUpdate(BaseModel):
     адрес значением по умолчанию. Отсутствие поля (`None`) означает «не менять»,
     а не «очистить» — очистка запрещена `NOT NULL` в БД и `min_length=1`.
 
-    R-05: `community_slug` здесь НЕТ и не появится. Место привязано к сообществу
-    навсегда: перенос ломал бы `uq_places_community_name` (имя, свободное в одном
+    R-05: `city_slug` здесь НЕТ и не появится. Место привязано к сообществу
+    навсегда: перенос ломал бы `uq_places_city_name` (имя, свободное в одном
     сообществе, занято в другом) и все сохранённые ссылки — карточки эпика 4
     адресуют место по `uuid`, а оно бы оказалось в чужой ленте без единого
     действия администратора в интерфейсе. Слаг задаётся только при создании.
@@ -107,7 +107,7 @@ class PlaceUpdate(BaseModel):
     address_text: str | None = Field(default=None, min_length=1, max_length=ADDRESS_MAX_LENGTH)
     is_active: bool | None = None
 
-    # AC-06, R-05: без `extra="forbid"` `community_slug` в теле `PATCH` прошёл бы
+    # AC-06, R-05: без `extra="forbid"` `city_slug` в теле `PATCH` прошёл бы
     # незаметно (Pydantic отбрасывает лишние поля по умолчанию), и клиент считал бы,
     # что перенос выполнен. `uuid`/`id`/`created_at` отбиваются тем же правилом.
     model_config = ConfigDict(extra="forbid")

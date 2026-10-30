@@ -49,8 +49,8 @@ const buttonVariants = cva(
       variant: {
         primary: "bg-accent text-accent-ink hover:bg-accent-hover active:bg-accent-pressed",
         secondary:
-          "border border-border-input bg-transparent text-ink hover:bg-surface active:bg-surface-raised",
-        quiet: "bg-transparent text-ink-secondary hover:bg-surface active:bg-surface-raised",
+          "border border-border-input bg-transparent text-ink hover:bg-surface-hover active:bg-surface-raised",
+        quiet: "bg-transparent text-ink-secondary hover:bg-surface-hover active:bg-surface-raised",
         // Опасно и необратимо. Не «ошибка пользователя» — факт домена.
         danger: "bg-danger text-accent-ink hover:opacity-90 active:opacity-95",
       },

@@ -46,7 +46,7 @@ def test_active_only_adds_is_active_condition() -> None:
     убрал из справочника.
     """
     statement = PlaceRepository.build_list_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         category=None,
         include_inactive=False,
         after=None,
@@ -54,7 +54,7 @@ def test_active_only_adds_is_active_condition() -> None:
     )
     where = _where(statement)
 
-    assert "places.community_slug = " in where
+    assert "places.city_slug = " in where
     assert "places.is_active IS true" in where
 
 
@@ -66,7 +66,7 @@ def test_include_inactive_removes_is_active_condition() -> None:
     маршрут, который 3.2 предоставляет для возврата в справочник.
     """
     statement = PlaceRepository.build_list_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         category=None,
         include_inactive=True,
         after=None,
@@ -74,7 +74,7 @@ def test_include_inactive_removes_is_active_condition() -> None:
     )
     where = _where(statement)
 
-    assert "places.community_slug = " in where
+    assert "places.city_slug = " in where
     assert "is_active" not in where
 
 
@@ -86,12 +86,12 @@ def test_category_condition_appears_only_when_set() -> None:
     """
     without = _where(
         PlaceRepository.build_list_statement(
-            community_slug="tomsk", category=None, include_inactive=False, after=None, limit=50
+            city_slug="tomsk", category=None, include_inactive=False, after=None, limit=50
         )
     )
     with_category = _where(
         PlaceRepository.build_list_statement(
-            community_slug="tomsk",
+            city_slug="tomsk",
             category="cinema",
             include_inactive=False,
             after=None,
@@ -111,7 +111,7 @@ def test_cursor_uses_strict_row_value_comparison() -> None:
     потеряло бы строки с одинаковым `created_at` (одна транзакция).
     """
     statement = PlaceRepository.build_list_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         category=None,
         include_inactive=False,
         after=_after(),
@@ -130,7 +130,7 @@ def test_no_cursor_keeps_statement_without_row_value() -> None:
     первая страница начиналась бы с будущего времени и была бы пустой.
     """
     statement = PlaceRepository.build_list_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         category=None,
         include_inactive=False,
         after=None,
@@ -150,7 +150,7 @@ def test_order_by_contains_created_at_and_uuid() -> None:
     страницах — дубль или потеря.
     """
     statement = PlaceRepository.build_list_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         category=None,
         include_inactive=False,
         after=None,
@@ -170,7 +170,7 @@ def test_limit_has_one_extra_row() -> None:
     `cursor` всегда будет `null`, и клиент остановится на первой странице.
     """
     statement = PlaceRepository.build_list_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         category=None,
         include_inactive=False,
         after=None,
@@ -191,7 +191,7 @@ def test_count_statement_has_no_order_limit_or_cursor() -> None:
     бы `total`, а контракт §7.1 требует «сколько всего под фильтром»).
     """
     statement = PlaceRepository.build_count_statement(
-        community_slug="tomsk", category=None, include_inactive=False
+        city_slug="tomsk", category=None, include_inactive=False
     )
     sql = _sql(statement)
 
@@ -208,7 +208,7 @@ def test_count_statement_carries_category_filter() -> None:
     с содержимым страницы, и пагинация «2 страницы из 1 строки».
     """
     statement = PlaceRepository.build_count_statement(
-        community_slug="tomsk", category="cinema", include_inactive=False
+        city_slug="tomsk", category="cinema", include_inactive=False
     )
     where = _where(statement)
 
@@ -223,7 +223,7 @@ def test_count_statement_honours_include_inactive() -> None:
     `total` не совпал бы с числом элементов в выдаче.
     """
     statement = PlaceRepository.build_count_statement(
-        community_slug="tomsk", category=None, include_inactive=True
+        city_slug="tomsk", category=None, include_inactive=True
     )
 
     assert "is_active" not in _where(statement)
@@ -242,7 +242,7 @@ def test_truthy_non_bool_include_inactive_stays_fail_closed(truthy_non_bool: obj
     публичная выдача, а не админская.
     """
     statement = PlaceRepository.build_list_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         category=None,
         include_inactive=truthy_non_bool,  # type: ignore[arg-type]
         after=None,

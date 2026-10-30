@@ -30,7 +30,7 @@ class TestPageStatement:
         """
         statement = JoinRequestRepository.build_card_requests_page_statement(
             card_id=1,
-            community_slug="tomsk",
+            city_slug="tomsk",
             statuses=JOIN_REQUEST_APPLICANT_STATUSES,
             after=None,
             limit=21,
@@ -49,7 +49,7 @@ class TestPageStatement:
         """
         statement = JoinRequestRepository.build_card_requests_page_statement(
             card_id=7,
-            community_slug="tomsk",
+            city_slug="tomsk",
             statuses=(JoinRequestStatus.SELECTED,),
             after=None,
             limit=5,
@@ -67,7 +67,7 @@ class TestPageStatement:
 
         assert status_values == ["selected"]
 
-    def test_card_id_and_community_slice(self) -> None:
+    def test_card_id_and_city_slice(self) -> None:
         """AC-02: карточка по `card_id` и срез сообщества подзапросом.
 
         Краснеет, если снять срез сообщества: второй рубеж ADR-13 исчез бы,
@@ -75,7 +75,7 @@ class TestPageStatement:
         """
         statement = JoinRequestRepository.build_card_requests_page_statement(
             card_id=42,
-            community_slug="tomsk",
+            city_slug="tomsk",
             statuses=JOIN_REQUEST_APPLICANT_STATUSES,
             after=None,
             limit=21,
@@ -83,14 +83,14 @@ class TestPageStatement:
         sql = str(statement)
 
         assert "join_requests.card_id = " in sql
-        assert "event_cards.community_slug = " in sql
+        assert "event_cards.city_slug = " in sql
         assert "FROM event_cards" in sql
 
     def test_limit_is_applied(self) -> None:
         """AC-05: `LIMIT` присутствует — без него страница выгрузила бы всё."""
         statement = JoinRequestRepository.build_card_requests_page_statement(
             card_id=1,
-            community_slug="tomsk",
+            city_slug="tomsk",
             statuses=JOIN_REQUEST_APPLICANT_STATUSES,
             after=None,
             limit=21,
@@ -106,7 +106,7 @@ class TestPageStatement:
         """
         statement = JoinRequestRepository.build_card_requests_page_statement(
             card_id=1,
-            community_slug="tomsk",
+            city_slug="tomsk",
             statuses=JOIN_REQUEST_APPLICANT_STATUSES,
             after=None,
             limit=21,
@@ -126,7 +126,7 @@ class TestPageStatement:
         after_uuid = uuid_lib.uuid4()
         statement = JoinRequestRepository.build_card_requests_page_statement(
             card_id=1,
-            community_slug="tomsk",
+            city_slug="tomsk",
             statuses=JOIN_REQUEST_APPLICANT_STATUSES,
             after=(datetime(2026, 10, 24, 12, 0, tzinfo=UTC), after_uuid),
             limit=21,

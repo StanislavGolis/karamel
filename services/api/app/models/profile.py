@@ -33,12 +33,14 @@ CR 2.1, патч 14: признак полноты — CHECK `num_nulls(...) IN 
 from __future__ import annotations
 
 import uuid as uuid_lib
+from datetime import date
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     ForeignKeyConstraint,
     Identity,
     Index,
@@ -103,7 +105,17 @@ class Profile(TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # D-5: город — текст; CHECK требует отсутствие пробельных символов по краям.
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # D-3: возраст «замерзает» на момент заполнения — приемлемо для пилота.
+    # Стори 12.2, ADR-17: источник истины — дата рождения; возраст
+    # **вычисляется** сервером (`age_service.compute_age`).
+    #
+    # D-3 отменён решением владельца 2026-10-28: дата рождения хранится,
+    # потому что число лет устаревает в день рождения, а 18+ по нему
+    # не проверяется, а декларируется.
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # ADR-17: `age` НЕ удаляется — это legacy-fallback для 40 008 учёток,
+    # где даты рождения нет: восстановить её из числа лет математически
+    # невозможно. Удаление колонки лишило бы доступа всех старых
+    # пользователей (AC-5, grandfathering). Новые учётки пишут `NULL`.
     age: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     # D-4: зеркало `users.gender`. Дубль оправдан: выборка фильтрует
     # «город + противоположный пол» и нужен составной индекс без join.
@@ -173,8 +185,15 @@ class Profile(TimestampMixin, Base):
         # `city='Томск'` с пустыми name/age/bio объявлялась бы полной и
         # рендерилась пустой карточкой. `draft` разрешает любую заполненность —
         # онбординг пошаговый (фото в 2.2 раньше текста).
+        # Стори 12.2 (миграция `0036`): возраст принимается из ЛЮБОГО источника.
+        # Исходная форма требовала именно `age`, и новый пользователь
+        # (`birth_date` есть, `age = NULL`) получал `IntegrityError` → `500`
+        # при сохранении анкеты. Смысл ограничения сохранён: `complete`
+        # по-прежнему невозможен без возраста — он просто может быть датой.
+        # AC-5: старые строки с `age` и без `birth_date` остаются валидными.
         CheckConstraint(
-            "status <> 'complete' OR num_nulls(name, city, age, bio) = 0",
+            "status <> 'complete' OR (num_nulls(name, city, bio) = 0 "
+            "AND (age IS NOT NULL OR birth_date IS NOT NULL))",
             name="completeness",
         ),
     )

@@ -58,7 +58,7 @@ def _card(**overrides: Any) -> EventCard:
     values: dict[str, Any] = {
         "author_id": 7,
         "place_id": 42,
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
         "title": "Настольные игры",
         "category": "cafe",
         "starts_at": STARTS_AT,
@@ -80,6 +80,7 @@ def _card(**overrides: Any) -> EventCard:
 
 def test_default_limit_is_two(monkeypatch: pytest.MonkeyPatch) -> None:
     """AC-01, AC-02 (OQ-3): дефолт лимита — 2.
+    П2 (FR71): у автора не больше двух активных карточек одновременно.
 
     Краснеет, если поменять дефолт: 1 сделал бы вторую карточку автора
     невозможной без явной настройки `.env`, 3 нарушил бы FR71.

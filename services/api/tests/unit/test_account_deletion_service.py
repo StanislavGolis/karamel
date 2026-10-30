@@ -77,7 +77,7 @@ def _user(**overrides: Any) -> User:
         provider="phone",
         provider_user_id="+79001234567",
         phone="+79001234567",
-        community_slug="tomsk",
+        city_slug="tomsk",
     )
     user.uuid = uuid_lib.uuid4()
     user.status = "active"

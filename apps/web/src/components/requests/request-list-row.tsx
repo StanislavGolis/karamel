@@ -73,6 +73,15 @@ type RequestListRowProps = {
    * покрывает: он про РЕЖИМ карточки, а не про её состояние.
    */
   cardPublished: boolean;
+  /**
+   * Стори 12.6 (AC-3, Task 7.4): проходит ли заявитель рамки карточки.
+   *
+   * `null` — у карточки рамок нет, и пометки не должно быть вовсе: «вне
+   * ваших рамок» на карточке без рамок было бы ложью. `false` — заявка
+   * видна автору (мягкий фильтр, FR81), но вне рамок; тон `ink-muted`, а не
+   * `danger`: это констатация, а не ошибка человека.
+   */
+  withinBounds?: boolean | null;
 };
 
 export function RequestListRow({
@@ -81,6 +90,7 @@ export function RequestListRow({
   message,
   selectionAvailable,
   cardPublished,
+  withinBounds = null,
 }: RequestListRowProps) {
   const router = useRouter();
   // `pending` блокирует повторный клик: `select` НЕ идемпотентен (D-5b.2-9),
@@ -107,6 +117,11 @@ export function RequestListRow({
   return (
     <li className="flex flex-col gap-3 rounded-lg border border-border bg-surface-raised p-4">
       <PersonMini name={person.name} age={person.age} photoUrl={person.photo_url} />
+      {withinBounds === false ? (
+        // UX §1048, AC-3: пометка ТОЛЬКО автору — заявитель о причине не
+        // узнаёт (AC-4, FR81: отказ безличен). Тон констатации, не `danger`.
+        <p className="text-sm text-ink-muted">Вне ваших рамок</p>
+      ) : null}
       <p className="line-clamp-3 text-sm leading-relaxed text-ink">{message}</p>
       {selectionAvailable ? (
         <button

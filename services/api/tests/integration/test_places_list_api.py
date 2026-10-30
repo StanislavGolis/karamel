@@ -42,9 +42,9 @@ pytestmark = [
 EXPECTED_ITEM_KEYS = {"uuid", "name", "category", "address_text", "is_active"}
 
 
-def _community() -> str:
+def _city() -> str:
     """Слаг сообщества из конфига: тест не переписывает `.env` наизусть."""
-    return settings.default_community_slug
+    return settings.default_city_slug
 
 
 @pytest.fixture
@@ -89,7 +89,7 @@ async def _insert_place(
     *,
     name: str,
     category: str = "cafe",
-    community_slug: str | None = None,
+    city_slug: str | None = None,
     is_active: bool = True,
     minutes_offset: int = 0,
 ) -> uuid_lib.UUID:
@@ -102,7 +102,7 @@ async def _insert_place(
     await session.execute(
         text(
             "INSERT INTO places "
-            "(uuid, name, category, address_text, community_slug, is_active, "
+            "(uuid, name, category, address_text, city_slug, is_active, "
             "created_at, updated_at) "
             "VALUES (:uuid, :name, :category, :address, :slug, :is_active, "
             "now() + make_interval(mins => :offset), now())"
@@ -112,7 +112,7 @@ async def _insert_place(
             "name": name,
             "category": category,
             "address": "пр. Ленина, 1",
-            "slug": community_slug or _community(),
+            "slug": city_slug or _city(),
             "is_active": is_active,
             "offset": minutes_offset,
         },
@@ -136,7 +136,7 @@ async def test_list_without_session_is_401(client: AsyncClient) -> None:
     assert response.json() == {"code": "unauthenticated"}
 
 
-async def test_list_returns_only_active_places_of_own_community(
+async def test_list_returns_only_active_places_of_own_city(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-01: только активные места своего сообщества, порядок по `created_at`.
@@ -151,7 +151,7 @@ async def test_list_returns_only_active_places_of_own_community(
     second = await _insert_place(session, name="Кино „Победа“", category="cinema", minutes_offset=2)
     hidden = await _insert_place(session, name="Скрытое", is_active=False, minutes_offset=3)
     foreign = await _insert_place(
-        session, name="Чужое", community_slug="kemerovo", minutes_offset=4
+        session, name="Чужое", city_slug="kemerovo", minutes_offset=4
     )
 
     response = await client.get("/api/v1/places", cookies=_cookies(token))

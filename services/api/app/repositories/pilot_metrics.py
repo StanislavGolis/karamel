@@ -32,7 +32,7 @@ TD-10.5-1).** У `attendance` есть свой `created_at`, но это мом
 дате подтверждения»: знаменатель NFR3 менялся бы задним числом, когда
 участники отвечают на старые карточки, и «метрика на любую дату» (AC-01)
 переставала бы быть воспроизводимой. Поэтому NFR3 фильтруется через
-`JOIN event_cards` — в `attendance` нет ни `community_slug`, ни оси окна.
+`JOIN event_cards` — в `attendance` нет ни `city_slug`, ни оси окна.
 
 **Почему сырой `text()`, а не ORM-билдер.** Все четыре запроса — агрегаты с
 `FILTER`, `COALESCE`/`NULLIF` и CTE. ORM-форма выражения `count(*) FILTER
@@ -73,7 +73,7 @@ ASSEMBLED_STATUSES: tuple[str, ...] = (
 #: Полуинтервал `[from, to)`: граничная карточка не попадёт в оба соседних
 #: окна, и сумма двух окон равна окну их объединения (AC-01, P-19).
 _WINDOW = """
-      community_slug = :slug
+      city_slug = :slug
   AND created_at >= :period_from
   AND created_at < :period_to
   AND status IN :statuses
@@ -113,17 +113,17 @@ class PilotMetricsRepository:
         self._session = session
 
     def _params(
-        self, community_slug: str, period_from: datetime, period_to: datetime
+        self, city_slug: str, period_from: datetime, period_to: datetime
     ) -> dict[str, object]:
         return {
-            "slug": community_slug,
+            "slug": city_slug,
             "period_from": period_from,
             "period_to": period_to,
             "statuses": ASSEMBLED_STATUSES,
         }
 
     async def count_assembled(
-        self, *, community_slug: str, period_from: datetime, period_to: datetime
+        self, *, city_slug: str, period_from: datetime, period_to: datetime
     ) -> tuple[int, int]:
         """NFR1: доля собранных встреч (≥ 30%).
 
@@ -143,13 +143,13 @@ class PilotMetricsRepository:
         )
         row = (
             await self._session.execute(
-                statement, self._params(community_slug, period_from, period_to)
+                statement, self._params(city_slug, period_from, period_to)
             )
         ).one()
         return int(row.numerator), int(row.denominator or 0)
 
     async def count_joined_avg(
-        self, *, community_slug: str, period_from: datetime, period_to: datetime
+        self, *, city_slug: str, period_from: datetime, period_to: datetime
     ) -> tuple[int, int]:
         """NFR2: присоединений на карточку (≥ 1.5) — `sum(filled_count) / count(*)`.
 
@@ -170,18 +170,18 @@ class PilotMetricsRepository:
         )
         row = (
             await self._session.execute(
-                statement, self._params(community_slug, period_from, period_to)
+                statement, self._params(city_slug, period_from, period_to)
             )
         ).one()
         return int(row.numerator), int(row.denominator or 0)
 
     async def count_attendance_confirmed(
-        self, *, community_slug: str, period_from: datetime, period_to: datetime
+        self, *, city_slug: str, period_from: datetime, period_to: datetime
     ) -> tuple[int, int]:
         """NFR3: подтверждённая явка (≥ 60%) по карточкам, где явку уже спрашивали.
 
         **`JOIN event_cards` обязателен** (D-TD-1, TD-10.5-1). В `attendance`
-        нет `community_slug`, а его `created_at` — момент подтверждения.
+        нет `city_slug`, а его `created_at` — момент подтверждения.
         Без JOIN метрика была бы ОДИНАКОВОЙ для любого окна и по всем
         сообществам сразу: AC-01 («метрики на любую дату») для NFR3 не
         выполнялся бы, а тест на окно был бы либо красным, либо декоративным
@@ -220,13 +220,13 @@ class PilotMetricsRepository:
                 NULLIF((SELECT count(*) FROM asked), 0) AS denominator
             """
         )
-        params = self._params(community_slug, period_from, period_to)
+        params = self._params(city_slug, period_from, period_to)
         params["confirmed_status"] = AttendanceStatus.CONFIRMED
         row = (await self._session.execute(statement, params)).one()
         return int(row.numerator), int(row.denominator or 0)
 
     async def count_repeat_authors(
-        self, *, community_slug: str, period_from: datetime, period_to: datetime
+        self, *, city_slug: str, period_from: datetime, period_to: datetime
     ) -> tuple[int, int]:
         """NFR4: доля повторных авторов (≥ 25%).
 
@@ -254,7 +254,7 @@ class PilotMetricsRepository:
         )
         row = (
             await self._session.execute(
-                statement, self._params(community_slug, period_from, period_to)
+                statement, self._params(city_slug, period_from, period_to)
             )
         ).one()
         return int(row.numerator), int(row.denominator or 0)

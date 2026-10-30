@@ -57,7 +57,7 @@ async def _make_user(session: AsyncSession) -> int:
     row = await session.execute(
         text(
             "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
-            "community_slug) "
+            "city_slug) "
             "VALUES ('phone', :p, :p, 'user', 'female', 'active', 'tomsk') "
             "RETURNING id"
         ),

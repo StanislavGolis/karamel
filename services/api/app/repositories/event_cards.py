@@ -86,7 +86,7 @@ class EventCardRepository:
     def build_queue_statement(
         *,
         status_filter: str,
-        community_slug: str,
+        city_slug: str,
         after: tuple[datetime, uuid_lib.UUID] | None,
         limit: int,
     ) -> Select[Any]:
@@ -121,6 +121,10 @@ class EventCardRepository:
                 User.uuid.label("author_uuid"),
                 Profile.name.label("author_name"),
                 Profile.age.label("author_age"),
+                # Стори 12.2, AC-3: возраст вычисляет сервис по `birth_date`
+                # (fallback — legacy-`age`). Вторая колонка, а не замена:
+                # 40 008 анкет имеют только число лет.
+                Profile.birth_date.label("author_birth_date"),
                 Place.uuid.label("place_uuid"),
                 Place.name.label("place_name"),
             )
@@ -132,9 +136,9 @@ class EventCardRepository:
         # Найдено ревью исполнением: без него очередь отдавала карточки ЧУЖОГО
         # сообщества — модератор «Томска» видел и мог отклонить карточку
         # другого города, а `total` считал всю таблицу. Слаг берётся из
-        # настроек (`_resolve_community_slug`), а не из запроса: клиент не
+        # настроек (`_resolve_city_slug`), а не из запроса: клиент не
         # выбирает сообщество (ADR-01).
-        statement = statement.where(EventCard.community_slug == community_slug)
+        statement = statement.where(EventCard.city_slug == city_slug)
         if status_filter != "all":
             statement = statement.where(EventCard.verification_status == status_filter)
         if after is not None:
@@ -153,7 +157,7 @@ class EventCardRepository:
         )
 
     @staticmethod
-    def build_queue_count_statement(*, status_filter: str, community_slug: str) -> Select[Any]:
+    def build_queue_count_statement(*, status_filter: str, city_slug: str) -> Select[Any]:
         """AC-03, D-4.3-7: `total` очереди — БЕЗ курсора и без JOIN'ов.
 
         Курсор — позиция чтения, а не фильтр: `total` с курсором уменьшался бы
@@ -165,7 +169,7 @@ class EventCardRepository:
         и `scalar_one()` даёт честный `int` для mypy-strict.
         """
         statement = select(func.count(EventCard.id)).where(
-            EventCard.community_slug == community_slug
+            EventCard.city_slug == city_slug
         )
         if status_filter != "all":
             statement = statement.where(EventCard.verification_status == status_filter)
@@ -175,7 +179,7 @@ class EventCardRepository:
         self,
         *,
         status_filter: str,
-        community_slug: str,
+        city_slug: str,
         after: tuple[datetime, uuid_lib.UUID] | None,
         limit: int,
     ) -> tuple[list[Any], int]:
@@ -191,7 +195,7 @@ class EventCardRepository:
             raise ValueError("limit должен быть >= 1")
         page_statement = self.build_queue_statement(
             status_filter=status_filter,
-            community_slug=community_slug,
+            city_slug=city_slug,
             after=after,
             limit=limit,
         )
@@ -199,14 +203,14 @@ class EventCardRepository:
         rows = list(page_result.all())
 
         count_statement = self.build_queue_count_statement(
-            status_filter=status_filter, community_slug=community_slug
+            status_filter=status_filter, city_slug=city_slug
         )
         count_result = await self._session.execute(count_statement)
         total: int = count_result.scalar_one()
         return rows, total
 
     async def get_for_moderation(
-        self, card_uuid: uuid_lib.UUID, *, community_slug: str
+        self, card_uuid: uuid_lib.UUID, *, city_slug: str
     ) -> EventCard | None:
         """AC-04, AC-05: карточка по публичному `uuid` без фильтра автора.
 
@@ -226,7 +230,7 @@ class EventCardRepository:
                 # ЧУЖОГО сообщества запрещено тем же срезом, что в очереди.
                 # Без него `approve`/`reject` работали по любому публичному
                 # `uuid`, который модератор мог получить вне очереди.
-                EventCard.community_slug == community_slug,
+                EventCard.city_slug == city_slug,
             )
             .execution_options(populate_existing=True)
         )
@@ -250,7 +254,7 @@ class EventCardRepository:
         """
         # CR 5а.2, Task 2.2: делегирование в `UserRepository` — одна реализация
         # блокировки актора на проект. Две копии `SELECT users.id ... FOR UPDATE`
-        # разошлись бы при первом изменении (например, добавлении `community`),
+        # разошлись бы при первом изменении (например, добавлении `city`),
         # и публикация с подачей заявки начали бы брать разные блокировки под
         # одним и тем же порядком ADR-09 — это прямой путь к дедлоку.
         # SQL не меняется: текст и порядок байтов те же, тесты 4.4 зелёные.
@@ -364,12 +368,14 @@ class EventCardRepository:
     @staticmethod
     def build_feed_statement(
         *,
-        community_slug: str,
+        city_slug: str,
         now: datetime,
         category: str | None,
         has_seats: bool,
         after: tuple[datetime, uuid_lib.UUID] | None,
         limit: int,
+        kind: str | None = None,
+        activity: str | None = None,
     ) -> Select[Any]:
         """AC-01, AC-04, AC-05, AC-08: страница ленты с местом и автором.
 
@@ -414,6 +420,10 @@ class EventCardRepository:
                 User.uuid.label("author_uuid"),
                 Profile.name.label("author_name"),
                 Profile.age.label("author_age"),
+                # Стори 12.2, AC-3: возраст вычисляет сервис по `birth_date`
+                # (fallback — legacy-`age`). Вторая колонка, а не замена:
+                # 40 008 анкет имеют только число лет.
+                Profile.birth_date.label("author_birth_date"),
                 Place.uuid.label("place_uuid"),
                 Place.name.label("place_name"),
                 Place.address_text.label("place_address_text"),
@@ -423,7 +433,7 @@ class EventCardRepository:
             .outerjoin(Profile, Profile.user_id == User.id)
             .outerjoin(Place, Place.id == EventCard.place_id)
             .where(
-                EventCard.community_slug == community_slug,
+                EventCard.city_slug == city_slug,
                 EventCard.status.in_(FEED_STATUSES),
                 # AC-02 стори 5б.1: карточка с ИСТЁКШИМ окном решения не
                 # показывается как открытая. Воркер `card_windows` закроет её
@@ -460,6 +470,15 @@ class EventCardRepository:
         )
         if category is not None:
             statement = statement.where(EventCard.category == category)
+        # AC-5 стори 12.4 (FR117/FR118): фильтры по смыслу встречи.
+        # Независимы друг от друга и от `category`: два `WHERE` подряд —
+        # это конъюнкция, и `?kind=date&activity=coffee` вернёт только
+        # совпавшие по обоим признакам. Замена на `or` здесь дала бы
+        # «date ИЛИ coffee», то есть карточки, не подходящие под запрос.
+        if kind is not None:
+            statement = statement.where(EventCard.kind == kind)
+        if activity is not None:
+            statement = statement.where(EventCard.activity == activity)
         if has_seats:
             statement = statement.where(EventCard.filled_count < EventCard.capacity)
         if after is not None:
@@ -476,7 +495,13 @@ class EventCardRepository:
 
     @staticmethod
     def build_feed_count_statement(
-        *, community_slug: str, now: datetime, category: str | None, has_seats: bool
+        *,
+        city_slug: str,
+        now: datetime,
+        category: str | None,
+        has_seats: bool,
+        kind: str | None = None,
+        activity: str | None = None,
     ) -> Select[Any]:
         """AC-07 (X-07): `total` ленты — БЕЗ курсора и без JOIN'ов.
 
@@ -497,7 +522,7 @@ class EventCardRepository:
         границы страниц. Не «чинить» ни `REPEATABLE READ`, ни блокировками.
         """
         statement = select(func.count(EventCard.id)).where(
-            EventCard.community_slug == community_slug,
+            EventCard.city_slug == city_slug,
             EventCard.status.in_(FEED_STATUSES),
             # AC-02 стори 5б.1: карточка с ИСТЁКШИМ окном решения не
             # показывается как открытая. Воркер `card_windows` закроет её
@@ -516,11 +541,18 @@ class EventCardRepository:
             # скрытых мест, которых нет на странице («5 всего, 0 на
             # странице»). Подзапросом, а не JOIN: docstring ниже обещает
             # «без JOIN'ов», и план `id IN (SELECT ...)` по частичному
-            # индексу `idx_places_community_active` — тот же.
+            # индексу `idx_places_city_active` — тот же.
             EventCard.place_id.in_(select(Place.id).where(Place.is_active.is_(True))),
         )
         if category is not None:
             statement = statement.where(EventCard.category == category)
+        # AC-5 стори 12.4: ТОТ ЖЕ предикат, что в `build_feed_statement`.
+        # Фильтр только на странице дал бы «3 всего, 0 на странице» — клиент
+        # не смог бы объяснить расхождение (D-4.5-9).
+        if kind is not None:
+            statement = statement.where(EventCard.kind == kind)
+        if activity is not None:
+            statement = statement.where(EventCard.activity == activity)
         if has_seats:
             statement = statement.where(EventCard.filled_count < EventCard.capacity)
         return statement
@@ -528,12 +560,14 @@ class EventCardRepository:
     async def list_feed_page(
         self,
         *,
-        community_slug: str,
+        city_slug: str,
         now: datetime,
         category: str | None,
         has_seats: bool,
         after: tuple[datetime, uuid_lib.UUID] | None,
         limit: int,
+        kind: str | None = None,
+        activity: str | None = None,
     ) -> tuple[list[Any], int]:
         """AC-01, AC-07, AC-08: страница ленты и `total` за два запроса.
 
@@ -549,18 +583,25 @@ class EventCardRepository:
         if limit < 1:
             raise ValueError("limit должен быть >= 1")
         page_statement = self.build_feed_statement(
-            community_slug=community_slug,
+            city_slug=city_slug,
             now=now,
             category=category,
             has_seats=has_seats,
             after=after,
             limit=limit,
+            kind=kind,
+            activity=activity,
         )
         page_result = await self._session.execute(page_statement)
         rows = list(page_result.all())
 
         count_statement = self.build_feed_count_statement(
-            community_slug=community_slug, now=now, category=category, has_seats=has_seats
+            city_slug=city_slug,
+            now=now,
+            category=category,
+            has_seats=has_seats,
+            kind=kind,
+            activity=activity,
         )
         count_result = await self._session.execute(count_statement)
         total: int = count_result.scalar_one()
@@ -568,7 +609,7 @@ class EventCardRepository:
 
     @staticmethod
     def build_get_visible_statement(
-        *, card_uuid: uuid_lib.UUID, community_slug: str
+        *, card_uuid: uuid_lib.UUID, city_slug: str
     ) -> Select[Any]:
         """AC-02 (ADR-13, §7.2): карточка по `uuid` в срезе сообщества.
 
@@ -593,6 +634,10 @@ class EventCardRepository:
                 User.uuid.label("author_uuid"),
                 Profile.name.label("author_name"),
                 Profile.age.label("author_age"),
+                # Стори 12.2, AC-3: возраст вычисляет сервис по `birth_date`
+                # (fallback — legacy-`age`). Вторая колонка, а не замена:
+                # 40 008 анкет имеют только число лет.
+                Profile.birth_date.label("author_birth_date"),
                 Place.uuid.label("place_uuid"),
                 Place.name.label("place_name"),
                 Place.address_text.label("place_address_text"),
@@ -608,7 +653,7 @@ class EventCardRepository:
             .outerjoin(Place, Place.id == EventCard.place_id)
             .where(
                 EventCard.uuid == card_uuid,
-                EventCard.community_slug == community_slug,
+                EventCard.city_slug == city_slug,
             ),
         )
 
@@ -654,7 +699,7 @@ class EventCardRepository:
         return int(cast("CursorResult[Any]", result).rowcount or 0)
 
     async def get_visible_card(
-        self, *, card_uuid: uuid_lib.UUID, community_slug: str
+        self, *, card_uuid: uuid_lib.UUID, city_slug: str
     ) -> Any | None:
         """AC-02: строка карточки с местом и автором или `None`.
 
@@ -665,7 +710,7 @@ class EventCardRepository:
         """
         result = await self._session.execute(
             self.build_get_visible_statement(
-                card_uuid=card_uuid, community_slug=community_slug
+                card_uuid=card_uuid, city_slug=city_slug
             ).execution_options(populate_existing=True)
         )
         return result.first()
@@ -1176,6 +1221,12 @@ class EventCardRepository:
             .where(
                 EventCard.status == EventCardStatus.PUBLISHED,
                 EventCard.expires_at < now - timedelta(minutes=grace_minutes),
+                # CR 12.6 H-1: помеченные воркером карточки — НЕ зависшие.
+                # Без этого условия карточка с рамками, отсекшими всех, давала
+                # `count=1` на здоровом воркере и слала ложный алерт
+                # «воркер лежит» каждый час — дедуп 10.7 (`WINDOW_OVERDUE_
+                # ALERT_KEY`) замьютил бы канал ровно тогда, когда он нужен.
+                EventCard.audience_skipped_at.is_(None),
             )
         )
         result = await self._session.execute(statement)
@@ -1212,6 +1263,19 @@ class EventCardRepository:
             .where(
                 EventCard.status == EventCardStatus.PUBLISHED,
                 EventCard.expires_at <= now,
+                # CR 12.6 H-1/H-3: карточка, у которой рамки отсекли всех,
+                # остаётся `published` по AC-5, но воркеру её больше не
+                # предлагать НЕЧЕГО: решение уже принято (его нет), а заявки
+                # живы. Без этого клауза карточка попадала в выборку вечно
+                # (замер CR: `skipped: 1` на каждом прогоне), и из-за
+                # `order_by(expires_at, id)` с самым старым `expires_at`
+                # занимала ГОЛОВУ очереди — 200 таких карточек останавливали
+                # обработку всех остальных (H-3, замер: здоровая карточка не
+                # обработана за 3 прогона при `limit=2`).
+                #
+                # Маркер снимается, когда появляется шанс на решение: правка
+                # рамок автором или новая заявка (`submit_join_request`).
+                EventCard.audience_skipped_at.is_(None),
             )
             .order_by(EventCard.expires_at, EventCard.id)
             .limit(limit)
@@ -1232,22 +1296,96 @@ class EventCardRepository:
 
         `populate_existing` не нужен: запрос скалярный, ORM-объект карточки
         не материализуется, и identity map не участвует в ответе.
+
+        **Стори 12.6 (AC-5, FR119): три поля рамок.** Автовыбор обязан
+        фильтровать очередь по рамкам аудитории, а прочитать их можно только
+        здесь — вторым запросом это было бы лишнее обращение на горячем пути
+        воркера (≤200 карточек раз в 60 с). Рамки возвращаются как есть
+        (`None` = не задана): решение «строить предикат или нет» принимает
+        ядро через `EventCard.has_audience_bounds`-эквивалент.
         """
         return select(
-            EventCard.uuid, EventCard.status, EventCard.expires_at, EventCard.capacity
+            EventCard.uuid,
+            EventCard.status,
+            EventCard.expires_at,
+            EventCard.capacity,
+            EventCard.gender_filter,
+            EventCard.age_min,
+            EventCard.age_max,
         ).where(EventCard.id == card_id)
 
     async def decision_state(
         self, *, card_id: int
-    ) -> tuple[uuid_lib.UUID, str, datetime, int] | None:
-        """AC-03: `(uuid, status, expires_at, capacity)` карточки или `None`.
+    ) -> tuple[uuid_lib.UUID, str, datetime, int, str | None, int | None, int | None] | None:
+        """AC-03: `(uuid, status, expires_at, capacity, gender, age_min, age_max)`.
 
         `None` — карточки нет (физического удаления нет, R-04; исход
         невозможен, но ядро обязано вернуть `SKIPPED`, а не упасть).
+
+        Рамки в кортеже с 12.6: автовыбор фильтрует очередь по ним ОДНИМ
+        предикатом (`JoinRequestRepository.build_within_bounds_predicate`),
+        и второй запрос за тремя `NULL`-able колонками на карточку был бы
+        платой без причины.
         """
         result = await self._session.execute(self.build_decision_state_statement(card_id=card_id))
         row = result.first()
-        return None if row is None else (row[0], str(row[1]), row[2], int(row[3]))
+        return (
+            None
+            if row is None
+            else (row[0], str(row[1]), row[2], int(row[3]), row[4], row[5], row[6])
+        )
+
+    async def mark_audience_skipped(self, *, card_id: int, now: datetime) -> bool:
+        """CR 12.6 H-1: помечает карточку «рамки отсекли всех».
+
+        Терминального статуса быть не может (AC-5: карточка остаётся
+        `published`, заявки живы), поэтому дедупликация идёт маркером
+        `audience_skipped_at`. Помеченная карточка выпадает из
+        `due_decision_ids` (нет вечного повтора, нет голодания очереди —
+        H-1/H-3) и из `count_overdue_windows` (нет ложного алерта).
+
+        Возвращает `True`, если маркер поставлен этим вызовом.
+
+        `WHERE audience_skipped_at IS NULL` — CAS, а не слепой `UPDATE`: два
+        прогона воркера на одной карточке не должны оба считать себя
+        «постановщиками» (прецедент идемпотентности `mark_reminded`, ADR-15).
+        """
+        result = await self._session.execute(
+            update(EventCard)
+            .where(
+                EventCard.id == card_id,
+                EventCard.audience_skipped_at.is_(None),
+            )
+            .values(audience_skipped_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        return cast(CursorResult[Any], result).rowcount > 0
+
+    @staticmethod
+    def build_clear_audience_skipped_statement(*, card_id: int) -> Any:
+        """CR 12.6 H-1: снимает маркер — «появился шанс на решение».
+
+        Два повода: автор изменил рамки (`update_card`) или на карточку
+        подали новую заявку (`submit_join_request`). Во втором случае новый
+        заявитель может проходить рамки, и пропускать его до снятия метки
+        вручную значило бы терять выбор.
+        """
+        return (
+            update(EventCard)
+            .where(
+                EventCard.id == card_id,
+                EventCard.audience_skipped_at.is_not(None),
+            )
+            .values(audience_skipped_at=None)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def clear_audience_skipped(self, *, card_id: int) -> int:
+        """Снимает маркер. Возвращает число изменённых строк (0 — маркера не было)."""
+        result = await self._session.execute(
+            self.build_clear_audience_skipped_statement(card_id=card_id)
+        )
+        return int(cast(CursorResult[Any], result).rowcount)
 
     async def due_decision_ids(
         self, *, now: datetime, limit: int

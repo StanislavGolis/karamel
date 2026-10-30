@@ -114,7 +114,9 @@ async def read_my_profile(
     if profile is None:
         return _error("profile_not_found", 404)
     response.headers["cache-control"] = "no-store"
-    return ProfileOwn.model_validate(profile)
+    # Стори 12.2, AC-2: `age` вычисляется из `birth_date` (или legacy-`age`),
+    # а не читается с модели: у новых учёток колонка `age` — `NULL`.
+    return ProfileOwn.from_profile(profile)
 
 
 @router.post("", response_model=ProfileOwn, status_code=201)
@@ -153,7 +155,9 @@ async def create_my_profile(
     # AC-02: `201` при создании, `200` при заполнении черновика (D-1).
     response.status_code = 201 if created else 200
     response.headers["cache-control"] = "no-store"
-    return ProfileOwn.model_validate(profile)
+    # Стори 12.2, AC-2: `age` вычисляется из `birth_date` (или legacy-`age`),
+    # а не читается с модели: у новых учёток колонка `age` — `NULL`.
+    return ProfileOwn.from_profile(profile)
 
 
 @router.patch("/me", response_model=ProfileOwn)
@@ -185,7 +189,9 @@ async def update_my_profile(
 
     await session.commit()
     response.headers["cache-control"] = "no-store"
-    return ProfileOwn.model_validate(profile)
+    # Стори 12.2, AC-2: `age` вычисляется из `birth_date` (или legacy-`age`),
+    # а не читается с модели: у новых учёток колонка `age` — `NULL`.
+    return ProfileOwn.from_profile(profile)
 
 
 @router.get("/me/photos", response_model=PhotoListResponse)

@@ -121,7 +121,7 @@ async def _create_user(session: AsyncSession) -> int:
     row = await session.execute(
         text(
             "INSERT INTO users (uuid, provider, provider_user_id, phone, role, status, "
-            "age_confirmed, consent_given_at, community_slug) "
+            "age_confirmed, consent_given_at, city_slug) "
             "VALUES (gen_random_uuid(), 'phone', :phone, :phone, 'user', 'active', "
             "true, now(), 'tomsk') "
             "RETURNING id"
@@ -134,7 +134,7 @@ async def _create_user(session: AsyncSession) -> int:
 async def _create_place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', 'tomsk', true) RETURNING id"
         ),
         {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -147,11 +147,11 @@ async def _create_card(session: AsyncSession, *, author_id: int, place_id: int) 
     now = datetime.now(UTC)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, 'tomsk', 'Встреча', NULL, 'cafe', :starts, 4, 2880, "
-            ":expires, 'published', 0, 'approved', :published_at) RETURNING id"
+            ":expires, 'published', 0, 'approved', :published_at, 'company', 'other') RETURNING id"
         ),
         {
             "author": author_id,

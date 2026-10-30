@@ -39,6 +39,7 @@ from sqlalchemy import text
 
 from app.core.db import get_engine
 from app.core.redis import get_redis
+from app.services.backup_status import backup_freshness
 
 # Предел на одну проверку. Три секунды: `PING` и `SELECT 1` отвечают за
 # миллисекунды, а «висит дольше» уже само по себе инцидент. Пять секунд
@@ -103,21 +104,29 @@ async def _run_check(name: str, check: Callable[[], Awaitable[str]]) -> str:
 
 @router.get("/health/deep", include_in_schema=False)
 async def health_deep() -> JSONResponse:
-    """AC-01: 200 если живы процесс, БД и Redis; 503 `degraded` иначе.
+    """AC-01 (+ AC-4 стори 11.10): процесс, БД, Redis и свежесть бэкапа.
 
     `include_in_schema=False`: маршрут для воркера, а не для клиента.
     Публичный контракт API (`openapi.json`) не должен обещать его
     потребителям — иначе появится клиент, которого мы не планировали.
 
-    Обе проверки идут ОДНОВРЕМЕННО (`gather`): последовательные сложили бы
-    свои таймауты (до 6 с), а probe ждёт ответ 5 с — «лежит всё» выглядело
+    Все проверки идут ОДНОВРЕМЕННО (`gather`): последовательные сложили бы
+    свои таймауты (до 9 с), а probe ждёт ответ 5 с — «лежит всё» выглядело
     бы как таймаут probe без диагноза.
+
+    **`checks.backup` НЕ влияет на `status` и HTTP-код** (AC-4, задача 4.3
+    стори 11.10). `stale` — деградация бэкапа, а не отказ сервиса: `503`
+    погасил бы `healthcheck` контейнера `api` и монитор 11.2, то есть дал бы
+    ложный алерт «всё лежит» вместо «бэкап устарел». Признак уезжает в тело,
+    где его разбирает `health_probe`.
     """
-    db_result, redis_result = await asyncio.gather(
+    db_result, redis_result, backup_result = await asyncio.gather(
         _run_check("db", _check_db),
         _run_check("redis", _check_redis),
+        _run_check("backup", backup_freshness),
     )
-    checks = {"db": db_result, "redis": redis_result}
+    checks = {"db": db_result, "redis": redis_result, "backup": backup_result}
+    # AC-4: бэкап в условии здоровья ОТСУТСТВУЕТ намеренно — см. докстринг.
     healthy = db_result == OK and redis_result == OK
     return JSONResponse(
         status_code=200 if healthy else 503,

@@ -13,7 +13,7 @@ import os
 import time
 import uuid as uuid_lib
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import pytest
@@ -47,7 +47,15 @@ EXPECTED_KEYS = {
     "updated_at",
 }
 
-VALID = {"name": "Аня", "city": "Томск", "age": 32, "bio": "люблю горы"}
+# Стори 12.2, AC-2: в запросе дата рождения, а не число лет.
+# 1994-03-14 даёт 32 полных года — прежнее значение сохранено,
+# чтобы остальные проверки (возраст в ответе, статус) не менялись.
+VALID = {
+    "name": "Аня",
+    "city": "Томск",
+    "birth_date": date(1994, 3, 14).isoformat(),
+    "bio": "люблю горы",
+}
 
 
 @pytest.fixture
@@ -99,7 +107,10 @@ async def _profile_row(session: AsyncSession, user_id: int) -> dict[str, Any] | 
     иначе они подтверждали бы состояние объекта в памяти, а не в PostgreSQL.
     """
     result = await session.execute(
-        text("SELECT name, city, age, bio, gender, status FROM profiles WHERE user_id = :id"),
+        text(
+            "SELECT name, city, age, birth_date, bio, gender, status "
+            "FROM profiles WHERE user_id = :id"
+        ),
         {"id": user_id},
     )
     row = result.mappings().one_or_none()
@@ -312,25 +323,37 @@ async def test_too_long_value_returns_domain_code(
     assert await _count_profiles(session, user.id) == 0
 
 
-@pytest.mark.parametrize("age", [17, 100])
-async def test_invalid_age_returns_422(
-    client: AsyncClient, session: AsyncSession, age: int
+@pytest.mark.parametrize(
+    ("birth_date", "code"),
+    [
+        # Стори 12.2, AC-4: менее 18 полных лет.
+        ("2010-01-01", "underage"),
+        # Верхняя граница: 126 лет — опечатка в годе.
+        ("1900-01-01", "invalid_birth_date"),
+        # Дата в будущем.
+        ("2030-01-01", "invalid_birth_date"),
+    ],
+)
+async def test_invalid_birth_date_returns_422(
+    client: AsyncClient, session: AsyncSession, birth_date: str, code: str
 ) -> None:
-    """AC-05: возраст вне 18..99 — `422 invalid_age`, анкета не создана.
+    """AC-4: недопустимая дата рождения — `422 <code>`, анкета не создана.
 
-    CR 2.3, патч 7: проверяется именно доменный код. Раньше тест подтверждал
-    только статус `422`, и удаление `_check_age` из сервиса оставляло его
-    зелёным: отказ приходил бы от CHECK в БД (`500`) или от Pydantic
-    (`invalid_request`) — ни то, ни другое не является AC-05.
+    CR 2.3, патч 7 (перенесено на 12.2): проверяется именно доменный код.
+    Раньше тест подтверждал только статус `422`, и удаление проверки из
+    сервиса оставляло его зелёным: отказ приходил бы от CHECK в БД (`500`)
+    или от Pydantic (`invalid_request`) — ни то, ни другое не является AC-4.
     """
     user, token = await _new_user(session)
 
     response = await client.post(
-        "/api/v1/profiles", json={**VALID, "age": age}, cookies={ACCESS_COOKIE_NAME: token}
+        "/api/v1/profiles",
+        json={**VALID, "birth_date": birth_date},
+        cookies={ACCESS_COOKIE_NAME: token},
     )
 
     assert response.status_code == 422
-    assert response.json()["code"] == "invalid_age"
+    assert response.json()["code"] == code
     assert await _count_profiles(session, user.id) == 0
 
 
@@ -479,7 +502,10 @@ async def test_patch_changes_only_provided_field(
     assert row["bio"] == "новый текст"
     assert row["name"] == "Аня"
     assert row["city"] == "Томск"
-    assert row["age"] == 32
+    # AC-2, AC-5: записалась ДАТА, колонка `age` осталась пустой —
+    # возраст вычисляется при чтении, а не хранится рядом с датой.
+    assert row["birth_date"] == date(1994, 3, 14)
+    assert row["age"] is None
     assert row["status"] == "complete"
 
 
@@ -533,7 +559,7 @@ async def test_patch_does_not_touch_other_users_profile(
     assert theirs["bio"] == "чужой текст"
 
 
-@pytest.mark.parametrize("field", ["name", "city", "bio", "age"])
+@pytest.mark.parametrize("field", ["name", "city", "bio", "birth_date"])
 async def test_patch_explicit_null_returns_field_required(
     client: AsyncClient, session: AsyncSession, field: str
 ) -> None:

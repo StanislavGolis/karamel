@@ -20,13 +20,14 @@ from app.api.v1.health import router as health_router
 from app.core.body_limit import MULTIPART_OVERHEAD, BodySizeLimitMiddleware
 from app.core.config import settings
 from app.core.db import dispose_engine
-from app.core.logging import configure_logging
+from app.core.logging import COORDINATE_FIELDS, configure_logging
 from app.core.no_store import NoStoreMiddleware
 from app.core.redis import dispose_redis
+from app.core.today import TodayMiddleware
 from app.models.enums import PlaceCategory
 from app.services.oauth import dispose_http_client
 from app.services.place_service import (
-    PLACE_COMMUNITY_IMMUTABLE_CODE,
+    PLACE_CITY_IMMUTABLE_CODE,
     PLACE_UNKNOWN_COMMUNITY_CODE,
 )
 from app.services.ws_broker import ws_shutdown, ws_startup
@@ -126,6 +127,14 @@ _PLACE_FIELD_LIMITS: dict[str, int] = {"name": 120, "address_text": 255}
 # `reversed` — значит этот middleware окажется ГЛУБЖЕ CORS и гарда тела, то
 # есть увидит ответы всех маршрутов, не мешая preflight (комментарий выше).
 app.add_middleware(NoStoreMiddleware)
+
+# Стори 12.3, Task 10 (долг `W-12.2-b`): одно «сегодня» на запрос. Гард 18+
+# (`deps.py`) и сериализация ответа (`event_card_service` и др.) вызывают
+# `compute_age` в ОДНОМ запросе; без фиксации значения на границе суток они
+# расходятся, и доступ либо с неверным возрастом в карточке, либо отказ при
+# верном. Middleware, а не зависимость: значение нужно и до, и после
+# выполнения цепочки зависимостей.
+app.add_middleware(TodayMiddleware)
 
 app.add_middleware(
     BodySizeLimitMiddleware,
@@ -269,7 +278,9 @@ async def validation_error_handler(_request: Request, exc: RequestValidationErro
     # Без него `lat=91` давал бы общий `invalid_request`, и клиент не мог
     # отличить «сломанную форму» от «геолокация вернула мусор»: первый случай
     # требует исправить ввод, второй — повторить определение города.
-    elif fields and fields <= {"lat", "lng", "accuracy"}:
+    # Стори 12.3, AC-2: список координат — ПРОИЗВОДНАЯ реестра, а не литерал
+    # на месте (`COORDINATE_FIELDS` ⊂ `SENSITIVE_FIELDS`).
+    elif fields and fields <= COORDINATE_FIELDS:
         code = "invalid_coordinates"
     # CR 3.1, патч 9 (AC-02): категория места вне белого списка — доменный код
     # И перечень допустимых значений. AC-02 требует «`422` с перечнем
@@ -335,16 +346,16 @@ def _place_field_error(
         # `PlaceUpdate`, но старый клиент или редизайн формы может его прислать;
         # без этой ветки ответ был общим `invalid_request`, и «перенос запрещён»
         # выглядел как сломанная форма.
-        if field == "community_slug" and error_type == "extra_forbidden":
-            return {"code": PLACE_COMMUNITY_IMMUTABLE_CODE}, 422
+        if field == "city_slug" and error_type == "extra_forbidden":
+            return {"code": PLACE_CITY_IMMUTABLE_CODE}, 422
 
-        # CR 3.2, патч 4 (AC-07): слаг, не проходящий `COMMUNITY_SLUG_PATTERN`,
+        # CR 3.2, патч 4 (AC-07): слаг, не проходящий `CITY_SLUG_PATTERN`,
         # отбивается Pydantic, а сервис на том же классе нарушения отвечает
         # `PLACE_UNKNOWN_COMMUNITY`. Без этой ветки `"Tomsk"` давал
         # `invalid_request`, а `"zzzz"` — `PLACE_UNKNOWN_COMMUNITY`, то есть два
         # кода на одно действие админа («сообщество не то»). Форма ответа
         # обязана совпадать на обоих путях.
-        if field == "community_slug" and error_type == "string_pattern_mismatch":
+        if field == "city_slug" and error_type == "string_pattern_mismatch":
             return {"code": PLACE_UNKNOWN_COMMUNITY_CODE}, 422
 
         if field not in _PLACE_FIELD_LIMITS:

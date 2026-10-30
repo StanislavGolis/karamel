@@ -1,7 +1,7 @@
 """Создание, правка и публикация карточки через API (Task 8; AC-01…AC-08).
 
 Реальный PostgreSQL, схема поднята Alembic. Проверяется не только код ответа,
-но и состояние БД: `201` не доказывает, что `author_id` и `community_slug`
+но и состояние БД: `201` не доказывает, что `author_id` и `city_slug`
 записаны правильно.
 
 §18.1: каждый тест краснеет от снятия конкретной защиты. §18.2: единственное
@@ -40,9 +40,9 @@ pytestmark = [
 EXPECTED_KEYS = {"uuid", "status", "verification_status", "created_at"}
 
 
-def _community() -> str:
+def _city() -> str:
     """Слаг сообщества из конфига пилота: тест не должен знать `.env` наизусть."""
-    return settings.default_community_slug
+    return settings.default_city_slug
 
 
 def _starts_at(**delta: int) -> datetime:
@@ -58,6 +58,9 @@ def _payload(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "title": "Настольные игры",
         "category": "cafe",
+        # Стори 12.4 (AC-3, FR117/FR118): оба поля обязательны в `EventCardCreate`.
+        "kind": "company",
+        "activity": "boardgames",
         "starts_at": _starts_at(days=3).isoformat(),
         "capacity": 3,
     }
@@ -94,7 +97,7 @@ async def _new_user(session: AsyncSession, *, role: str = UserRole.USER) -> tupl
 
 
 async def _insert_place(
-    session: AsyncSession, *, is_active: bool = True, community_slug: str | None = None
+    session: AsyncSession, *, is_active: bool = True, city_slug: str | None = None
 ) -> str:
     """Кладёт место напрямую в БД и возвращает его `uuid`.
 
@@ -102,12 +105,12 @@ async def _insert_place(
     """
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'пр. Ленина, 1', :slug, :active) RETURNING uuid"
         ),
         {
             "name": f"Кафе {uuid_lib.uuid4().hex[:8]}",
-            "slug": community_slug or _community(),
+            "slug": city_slug or _city(),
             "active": is_active,
         },
     )
@@ -118,7 +121,7 @@ async def _card_row(session: AsyncSession, card_uuid: str) -> dict[str, Any] | N
     """Строка карточки из БД сырым SQL: проверяется PostgreSQL, не identity map."""
     result = await session.execute(
         text(
-            "SELECT author_id, community_slug, status, verification_status, "
+            "SELECT author_id, city_slug, status, verification_status, "
             "filled_count, starts_at, expires_at, decision_window_minutes, "
             # Стори 4.6 (AC-02): правка опубликованной проверяется по сохранённому
             # заголовку — без него нельзя отличить «поле записано» от «ответ 200».
@@ -170,7 +173,7 @@ async def test_create_card_returns_ref_and_writes_row(
     Краснеет, если:
     - в теле появится `id`/`author_id`/`place_id` (нарушение D-2/§7.2);
     - `author_id` возьмётся из тела, а не из сессии;
-    - `community_slug` придёт от клиента (ADR-01).
+    - `city_slug` придёт от клиента (ADR-01).
     """
     user, token = await _new_user(session)
     place_uuid = await _insert_place(session)
@@ -193,7 +196,7 @@ async def test_create_card_returns_ref_and_writes_row(
     row = await _card_row(session, body["uuid"])
     assert row is not None
     assert row["author_id"] == user.id
-    assert row["community_slug"] == _community()
+    assert row["city_slug"] == _city()
     assert row["filled_count"] == 0
     assert await _count_cards(session) == 1
 
@@ -221,7 +224,7 @@ async def test_create_with_hidden_place_is_rejected(
     assert await _count_cards(session) == 0
 
 
-async def test_create_with_foreign_community_place_is_rejected(
+async def test_create_with_foreign_city_place_is_rejected(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-02 (ADR-13): место чужого сообщества — тот же код, что и скрытое.
@@ -231,7 +234,7 @@ async def test_create_with_foreign_community_place_is_rejected(
     `uuid` клиент узнал бы о существовании чужих мест.
     """
     _, token = await _new_user(session)
-    place_uuid = await _insert_place(session, community_slug="other-city")
+    place_uuid = await _insert_place(session, city_slug="other-city")
 
     response = await client.post(
         "/api/v1/cards",
@@ -341,9 +344,17 @@ async def test_update_own_draft_changes_fields_and_expires(
     `expires_at`: окно решения осталось бы от старого `starts_at`.
     """
     _, token = await _new_user(session)
-    card_uuid = await _create_card(client, session, token)
+    # Стори 12.5, AC-01: горизонт автора — 72 часа. Раньше тест создавал
+    # карточку на `days=3` (ровно граница) и двигал на `days=5` (120 ч) —
+    # теперь это `422 STARTS_AT_TOO_FAR`, и тест краснел бы не по предмету
+    # («пересчёт `expires_at`»), а по дальности даты. Предмет сохранён:
+    # создание на 24 ч, правка на 48 ч — движение ВПЕРЁД внутри горизонта,
+    # поэтому `expires_at` обязан вырасти.
+    card_uuid = await _create_card(
+        client, session, token, starts_at=_starts_at(days=1).isoformat()
+    )
     before = await _card_row(session, card_uuid)
-    new_starts = _starts_at(days=5).isoformat()
+    new_starts = _starts_at(days=2).isoformat()
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
@@ -603,7 +614,7 @@ async def test_create_sets_no_store_header(client: AsyncClient, session: AsyncSe
 # --- P-10 (CR 10.1): HTTP-код 404 для чужого сообщества -----------------------
 
 
-async def test_get_foreign_community_card_is_404_over_http(
+async def test_get_foreign_city_card_is_404_over_http(
     client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AC-05, ADR-13, P-10: чужое сообщество → HTTP `404`, не `403` и не `200`.
@@ -613,7 +624,7 @@ async def test_get_foreign_community_card_is_404_over_http(
     `_domain_error` в роуте и не проверялся ни разу.
 
     Пользователь чужого сообщества создаётся через `UserRepository.create`
-    с явным слагом; после DN-3 слаг обязан входить в `Settings.community_slugs`,
+    с явным слагом; после DN-3 слаг обязан входить в `Settings.city_slugs`,
     поэтому список сообществ расширяется на время создания (в пилоте сообщество
     одно, второго в `.env` нет).
     """
@@ -643,11 +654,11 @@ async def test_get_foreign_community_card_is_404_over_http(
     # 3. Зритель другого сообщества.
     other = "other-city"
     monkeypatch.setattr(
-        settings, "community_slugs", (*settings.community_slugs, other)
+        settings, "city_slugs", (*settings.city_slugs, other)
     )
     phone = f"+7906{uuid_lib.uuid4().int % 10**7:07d}"
     stranger = await UserRepository(session).create(
-        provider="phone", provider_user_id=phone, phone=phone, community_slug=other
+        provider="phone", provider_user_id=phone, phone=phone, city_slug=other
     )
     stranger.age_confirmed = True
     stranger.consent_given_at = datetime.now(UTC)

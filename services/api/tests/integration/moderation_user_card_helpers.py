@@ -161,10 +161,10 @@ async def _place_id(session: AsyncSession) -> int:
         return int(found)
     created = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     return int(created.scalar_one())
 
@@ -183,16 +183,16 @@ async def _message_report(
     chat_uuid = uuid_lib.uuid4()
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, category, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, category, "
             "starts_at, capacity, decision_window_minutes, expires_at, status, filled_count, "
-            "verification_status, published_at, chat_uuid) "
+            "verification_status, published_at, chat_uuid, kind, activity) "
             "VALUES (:a, :p, :s, 'Встреча', 'cafe', :st, 2, 60, :e, 'full', 2, 'approved', "
-            "        :pub, :chat) RETURNING id"
+            "        :pub, :chat, 'company', 'coffee') RETURNING id"
         ),
         {
             "a": reporter_id,
             "p": place_id,
-            "s": settings.default_community_slug,
+            "s": settings.default_city_slug,
             "st": reported_at,
             "e": reported_at - timedelta(hours=1),
             "pub": reported_at - timedelta(days=1),
@@ -331,16 +331,16 @@ async def add_attendance(
         starts = datetime.now(UTC) - timedelta(days=index + 1)
         card = await session.execute(
             text(
-                "INSERT INTO event_cards (author_id, place_id, community_slug, title, category, "
+                "INSERT INTO event_cards (author_id, place_id, city_slug, title, category, "
                 "starts_at, capacity, decision_window_minutes, expires_at, status, filled_count, "
-                "verification_status, published_at, chat_uuid) "
+                "verification_status, published_at, chat_uuid, kind, activity) "
                 "VALUES (:a, :p, :s, :title, 'cafe', :st, 2, 60, :st, 'full', 2, 'approved', "
-                "        :st, :chat) RETURNING id"
+                "        :st, :chat, 'company', 'coffee') RETURNING id"
             ),
             {
                 "a": user.id,
                 "p": place_id,
-                "s": settings.default_community_slug,
+                "s": settings.default_city_slug,
                 "title": f"Встреча {index}",
                 "st": starts,
                 "chat": uuid_lib.uuid4(),

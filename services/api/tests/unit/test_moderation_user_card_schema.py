@@ -31,13 +31,22 @@ def test_profile_rejects_extra_field() -> None:
 
 
 def test_profile_accepts_null_optional_fields() -> None:
-    """AC-14: пользователь без анкеты — четыре поля `None`, `status` есть."""
-    profile = ModerationUserProfile(uuid=uuid_lib.uuid4(), status="banned")
+    """AC-14: пользователь без анкеты — четыре поля `None`, `status` есть.
+
+    Стори 11.4 (CR P9) добавила седьмое поле `consent_version` **без дефолта**:
+    пропуск поля в конструкторе — `TypeError`, а не молчаливый `null`,
+    неотличимый от честного «версия неизвестна». Поэтому здесь оно передаётся
+    явно: у учётки без согласия версия именно `None`.
+    """
+    profile = ModerationUserProfile(
+        uuid=uuid_lib.uuid4(), status="banned", consent_version=None
+    )
     assert profile.name is None
     assert profile.city is None
     assert profile.age is None
     assert profile.gender is None
     assert profile.status == "banned"
+    assert profile.consent_version is None
 
 
 def test_profile_rejects_unknown_status() -> None:

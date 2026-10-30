@@ -28,6 +28,11 @@
   /* Поверхности — два уровня, не больше */
   --color-surface: #EAE7E0;
   --color-surface-raised: #F0EDE6;
+  /* Поверхность наведения (§6.4: `secondary`/`quiet` hover → фон surface).
+     Замер 2026-10-27 (node v22, WCAG 2.1): #C2BBAC к surface #EAE7E0 = 1.55:1,
+     к bg #F4F2EE = 1.71:1. Значения #EDE8DF из AC дают 1.01:1 к surface —
+     hover остался бы невидимым (замер в стори 11.9, З-1). */
+  --color-surface-hover: #C2BBAC;
   /* Текст — три уровня */
   --color-ink: #191B1F;
   --color-ink-secondary: #464B51;
@@ -100,6 +105,11 @@
   --color-bg: #161513;
   --color-surface: #1F1D1A;
   --color-surface-raised: #26241F;
+  /* Тёмная поверхность наведения: #46403A к surface #1F1D1A = 1.65:1,
+     к bg #161513 = 1.79:1. Значение AC #2A2823 даёт 1.14:1 (замер З-1).
+     ВНИМАНИЕ: ink-muted на этой поверхности — 3.39:1, ниже AA. На hover
+     допустимы только ink и ink-secondary (8.91 и 5.17). */
+  --color-surface-hover: #46403A;
   --color-ink: #F2EFE9;
   --color-ink-secondary: #BDB8AE;
   /* Н-5: #9A9489, не #918B80 — минимум 5.15:1 к raised */
@@ -118,10 +128,14 @@
   --color-border-subtle: #2A2823;
   --color-border-input: #7A756B;
   --color-focus-ring: #F2EFE9;
-  /* L-DS2-1: артефакт не задаёт disabled для тёмной темы. Не выдумываем hex —
-     переиспользуем роли: подложка surface, текст ink-muted (5.15:1 к surface-raised). */
-  --color-disabled-bg: var(--color-surface);
-  --color-disabled-ink: var(--color-ink-muted);
+  /* L-DS2-1, закрыт стори 11.9 (AC-5). Прежняя версия брала surface + ink-muted:
+     5.58:1 — обычный текст, неактивная кнопка не отличалась от активной.
+     Значения §6.4 в редакции 11.9: фон #6B6862 (3.03:1 к surface — подложка
+     различима), текст #2A2823 на нём 2.65:1 — осознанное исключение WCAG 1.4.3
+     для неактивных элементов. Причина недоступности обязана быть в
+     `aria-disabled` + `aria-describedby`, иначе исключение не оправдано. */
+  --color-disabled-bg: #6B6862;
+  --color-disabled-ink: #2A2823;
 
   /* На тёмном тень должна быть чернее фона: 16% не видно вообще (§17.12) */
   --shadow-overlay: 0 8px 28px rgba(0, 0, 0, 0.56);

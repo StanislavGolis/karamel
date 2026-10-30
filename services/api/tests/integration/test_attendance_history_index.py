@@ -35,6 +35,8 @@ from alembic import command
 
 pytestmark = [
     pytest.mark.integration,
+    # Стори 12.9 (AC-4, W-11.4-d): DDL на общей схеме — несовместим с xdist.
+    pytest.mark.ddl,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
 
@@ -130,7 +132,7 @@ async def test_history_query_uses_index_without_sort(session: AsyncSession) -> N
             await session.execute(
                 text(
                     "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
-                    "age_confirmed, consent_given_at, community_slug) "
+                    "age_confirmed, consent_given_at, city_slug) "
                     "VALUES ('phone', :pu, :pu, 'user', 'female', 'active', true, "
                     "now(), 'tomsk') "
                     "RETURNING id"
@@ -143,7 +145,7 @@ async def test_history_query_uses_index_without_sort(session: AsyncSession) -> N
         (
             await session.execute(
                 text(
-                    "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                    "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                     "VALUES (:n, 'cafe', 'ул. Мира, 1', 'tomsk', true) RETURNING id"
                 ),
                 {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -155,7 +157,7 @@ async def test_history_query_uses_index_without_sort(session: AsyncSession) -> N
         text(
             """
             INSERT INTO users (provider, provider_user_id, phone, role, gender, status,
-                               age_confirmed, consent_given_at, community_slug)
+                               age_confirmed, consent_given_at, city_slug)
             SELECT 'phone', '+7904' || lpad(g::text, 7, '0'),
                    '+7904' || lpad(g::text, 7, '0'), 'user',
                    'female', 'active', true, now(), 'tomsk'
@@ -166,13 +168,14 @@ async def test_history_query_uses_index_without_sort(session: AsyncSession) -> N
     await session.execute(
         text(
             """
-            INSERT INTO event_cards (author_id, place_id, community_slug, title, description,
+            INSERT INTO event_cards (author_id, place_id, city_slug, title, description,
                                      category, starts_at, capacity, decision_window_minutes,
                                      expires_at, status, filled_count, verification_status,
-                                     published_at)
+                                     published_at, kind, activity)
             SELECT :a, :p, 'tomsk', 'Массовая встреча ' || g::text, NULL, 'cafe',
                    now() - interval '1 hour', 6, 60, now() - interval '2 hours',
-                   'full', 6, 'approved', now() - interval '1 day'
+                   'full', 6, 'approved', now() - interval '1 day',
+                   'company', 'other'
               FROM generate_series(1, 100) AS g
             """
         ),
@@ -293,7 +296,7 @@ def test_downgrade_guard_stops_above_threshold() -> None:
                             text(
                                 "INSERT INTO users (provider, provider_user_id, phone, role, "
                                 "gender, status, age_confirmed, consent_given_at, "
-                                "community_slug) "
+                                "city_slug) "
                                 "VALUES ('phone', :p, :p, 'user', 'female', 'active', "
                                 "true, now(), 'tomsk') RETURNING id"
                             ),
@@ -306,7 +309,7 @@ def test_downgrade_guard_stops_above_threshold() -> None:
                         await connection.execute(
                             text(
                                 "INSERT INTO places (name, category, address_text, "
-                                "community_slug, is_active) "
+                                "city_slug, is_active) "
                                 "VALUES (:n, 'cafe', 'ул. Мира, 1', 'tomsk', true) RETURNING id"
                             ),
                             {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -317,13 +320,14 @@ def test_downgrade_guard_stops_above_threshold() -> None:
                     (
                         await connection.execute(
                             text(
-                                "INSERT INTO event_cards (author_id, place_id, community_slug, "
+                                "INSERT INTO event_cards (author_id, place_id, city_slug, "
                                 "title, description, category, starts_at, capacity, "
                                 "decision_window_minutes, expires_at, status, filled_count, "
-                                "verification_status, published_at) "
+                                "verification_status, published_at, kind, activity) "
                                 "VALUES (:a, :p, 'tomsk', 'Guard 0024', NULL, 'cafe', "
                                 "now() - interval '1 hour', 2, 60, now() - interval '2 hours', "
-                                "'full', 2, 'approved', now() - interval '1 day') RETURNING id"
+                                "'full', 2, 'approved', now() - interval '1 day',"
+                                "'company', 'other') RETURNING id"
                             ),
                             {"a": author_id, "p": place_id},
                         )
@@ -332,7 +336,7 @@ def test_downgrade_guard_stops_above_threshold() -> None:
                 await connection.execute(
                     text(
                         "INSERT INTO users (provider, provider_user_id, phone, role, gender, "
-                        "status, age_confirmed, consent_given_at, community_slug) "
+                        "status, age_confirmed, consent_given_at, city_slug) "
                         "SELECT 'phone', '+7996' || lpad(g::text, 7, '0'), "
                         "'+7996' || lpad(g::text, 7, '0'), 'user', 'female', 'active', "
                         "true, now(), 'tomsk' "

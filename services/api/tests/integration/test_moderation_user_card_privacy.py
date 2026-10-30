@@ -1,6 +1,6 @@
 """Приватность карточки модератора (стори 8.5; AC-05, NFR27, D-66).
 
-**Главное утверждение:** в `profile` РОВНО шесть полей, и ни одного
+**Главное утверждение:** в `profile` РОВНО семь полей, и ни одного
 идентификатора входа. Проверяется **сериализованный JSON**, а не модель:
 поле можно добавить в `Profile` (или в SQL-проекцию), и оно уедет в ответ,
 минуя локальный объект схемы.
@@ -33,8 +33,32 @@ pytestmark = [
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
 
-#: AC-05, D-66: ровно эти шесть полей. Дополнение множества — утечка.
-EXPECTED_PROFILE_FIELDS = {"uuid", "name", "city", "age", "gender", "status"}
+#: AC-05, D-66: ровно эти поля. Дополнение множества — утечка.
+#:
+#: Стори 11.4 (AC-6, NFR36) добавила седьмое поле `consent_version`. Это
+#: осознанное расширение allowlist, а не утечка: версия правил — не
+#: идентификатор входа и не контакт, а факт согласия, который владелец обязан
+#: видеть (`W-10.4-b`). Тест по-прежнему ловит ЛЮБОЕ другое добавление.
+EXPECTED_PROFILE_FIELDS = {
+    "uuid",
+    "name",
+    "city",
+    "age",
+    "gender",
+    "status",
+    "consent_version",
+    # Стори 12.10 (AC-1, AC-9, D-12.10-1): фото — осознанное расширение
+    # allowlist, а не утечка. D-66 запрещал фото как СРЕДСТВО
+    # ИДЕНТИФИКАЦИИ ВХОДА (по нему нельзя увести аккаунт), а подписанный URL
+    # одобренного фото — тот же класс, что `EventCardAuthorProfile` (12.7).
+    # Модератор разбирает жалобу на анкету и обязан видеть то же фото, что
+    # видел жалобщик. Пара «ссылка + срок» — инвариант D-5a.4-6.
+    #
+    # Множество по-прежнему сравнивается РАВЕНСТВОМ: любое следующее
+    # добавление (в том числе `storage_key`) покраснеет.
+    "photo_url",
+    "photo_expires_in",
+}
 
 #: Идентификаторы входа и служебные поля: их не должно быть в ответе НИКАК —
 #: ни ключом, ни значением. `provider_user_id` — телефон или OAuth-id, по
@@ -50,8 +74,13 @@ FORBIDDEN_FRAGMENTS = (
 )
 
 
-async def test_profile_has_exactly_six_fields(session: AsyncSession) -> None:
-    """AC-05: allowlist полей профиля — лишний ключ это утечка."""
+async def test_profile_has_exactly_allowlisted_fields(session: AsyncSession) -> None:
+    """AC-05: allowlist полей профиля — лишний ключ это утечка.
+
+    Стори 11.4: полей стало семь (`consent_version`). Тест не ослаблен —
+    он по-прежнему сравнивает МНОЖЕСТВА, поэтому ловит любое добавление,
+    включая будущее необоснованное.
+    """
     target, _ = await make_target_user(session)
     await set_profile(session, user=target)
     _, token = await make_moderator(session)
@@ -62,6 +91,11 @@ async def test_profile_has_exactly_six_fields(session: AsyncSession) -> None:
         profile = response.json()["profile"]
 
     assert set(profile) == EXPECTED_PROFILE_FIELDS, set(profile) ^ EXPECTED_PROFILE_FIELDS
+    # Стори 12.10 (AC-10, D-11): наружу уходит ПОДПИСАННЫЙ URL, а не ключ
+    # объекта в бакете. Ключ — знание о внутренней раскладке хранилища, и по
+    # нему нельзя построить ссылку без подписи; отдельный ассерт нужен, потому
+    # что `photo_url` мог бы быть собран конкатенацией с ключом.
+    assert "storage_key" not in profile
 
 
 async def test_serialized_json_has_no_login_identifiers(session: AsyncSession) -> None:

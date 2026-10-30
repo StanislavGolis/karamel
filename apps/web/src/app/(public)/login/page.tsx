@@ -37,7 +37,7 @@ const DEFAULT_ERROR = "Не удалось войти. Попробуйте ещ
 
 /** Общие классы кнопок-провайдеров: одинаковое поведение мыши и фокуса. */
 const PROVIDER_BUTTON =
-  "flex min-h-11 items-center justify-center rounded-md border border-border-input px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
+  "flex min-h-11 items-center justify-center rounded-md border border-border-input px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring";
 
 /**
  * Баннер отказа. Отдельный компонент, потому что только он трогает

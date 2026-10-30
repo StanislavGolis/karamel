@@ -64,13 +64,13 @@ async def _seed_users(session: AsyncSession, count: int, *, offset: int = 0) -> 
     await session.execute(
         text(
             "INSERT INTO users (provider, provider_user_id, phone, role, status, gender, "
-            "age_confirmed, consent_given_at, community_slug) "
+            "age_confirmed, consent_given_at, city_slug) "
             "SELECT 'phone', '+7908' || lpad((g + :off)::text, 7, '0'), "
             "       '+7908' || lpad((g + :off)::text, 7, '0'), "
             "       'user', 'active', 'female', true, now(), :slug "
             "  FROM generate_series(1, :count) AS g"
         ),
-        {"off": offset, "count": count, "slug": settings.default_community_slug},
+        {"off": offset, "count": count, "slug": settings.default_city_slug},
     )
 
 
@@ -104,9 +104,10 @@ async def _seed_cards(
     status = "full" if filled >= 2 else "published"
     rows = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at, created_at) "
+            "filled_count, verification_status, published_at, created_at, "
+            "kind, activity) "
             "SELECT :a, :p, :slug, 'Встреча ' || g, NULL, 'cafe',"
             "       CAST(:created AS timestamptz) + (g * :step) * interval '1 hour' + interval '2 "
             " hours',"
@@ -116,14 +117,15 @@ async def _seed_cards(
             "       :status, :filled, 'approved',"
             "       CAST(:created AS timestamptz) + (g * :step) * interval '1 hour' - interval '1 "
             " day',"
-            "       CAST(:created AS timestamptz) + (g * :step) * interval '1 hour' "
+            "       CAST(:created AS timestamptz) + (g * :step) * interval '1 hour', "
+            "       'company', 'coffee' "
             "  FROM generate_series(1, :count) AS g "
             "RETURNING id"
         ),
         {
             "a": author_id,
             "p": place_id,
-            "slug": settings.default_community_slug,
+            "slug": settings.default_city_slug,
             "status": status,
             "filled": filled,
             "created": created,
@@ -143,10 +145,10 @@ async def _seed_volume(session: AsyncSession) -> None:
     """
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     place_id = int(place.scalar_one())
 
@@ -276,10 +278,10 @@ async def test_explain_is_consistent_with_p95_budget(session: AsyncSession) -> N
     """
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     place_id = int(place.scalar_one())
     await _seed_users(session, 10)
@@ -302,11 +304,11 @@ async def test_explain_is_consistent_with_p95_budget(session: AsyncSession) -> N
                     "EXPLAIN (ANALYZE, BUFFERS) "
                     "SELECT count(*) FILTER (WHERE filled_count >= 1), NULLIF(count(*), 0) "
                     "  FROM event_cards "
-                    " WHERE community_slug = :slug "
+                    " WHERE city_slug = :slug "
                     "   AND created_at >= :f AND created_at < :t "
                     "   AND status IN ('published','full','closed','finished')"
                 ),
-                {"slug": settings.default_community_slug, "f": FROM, "t": TO},
+                {"slug": settings.default_city_slug, "f": FROM, "t": TO},
             )
         ).all()
     )
@@ -323,7 +325,7 @@ async def test_explain_is_consistent_with_p95_budget(session: AsyncSession) -> N
     if "Seq Scan on event_cards" in plan:
         assert p95 <= P95_BUDGET_MS, (
             f"Seq Scan при p95 = {p95:.1f} мс > {P95_BUDGET_MS} мс: нужен индекс "
-            f"`ix_event_cards_metrics (community_slug, created_at, status)` "
+            f"`ix_event_cards_metrics (city_slug, created_at, status)` "
             f"миграцией 0034 (AC-06.3, Task 8.3). План:\n{plan}"
         )
     else:

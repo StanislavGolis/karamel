@@ -143,14 +143,14 @@ def test_viewer_participation_statement_is_batched_and_selected_only() -> None:
     assert "applicant_id=7" in sql
 
 
-def test_get_card_for_select_statement_slices_community_in_sql() -> None:
+def test_get_card_for_select_statement_slices_city_in_sql() -> None:
     """AC-04 (ADR-13): срез сообщества в SQL, а не в `if` после выборки.
 
-    Краснеет, если убрать `community_slug`: заявка чужого сообщества стала бы
+    Краснеет, если убрать `city_slug`: заявка чужого сообщества стала бы
     отличима от несуществующей (`404` с другим кодом).
     """
     sql = _sql(
         JoinRequestRepository.build_get_card_for_select_statement(REQUEST_UUID, "pilot")
     ).replace(" ", "")
-    assert "event_cards.community_slug='pilot'" in sql
+    assert "event_cards.city_slug='pilot'" in sql
     assert "join_requests.uuid=" in sql

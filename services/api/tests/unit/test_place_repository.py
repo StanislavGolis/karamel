@@ -1,13 +1,13 @@
 """Репозиторий мест (Task 6.5; AC-04).
 
-§18.2: проверяется текст запроса, а не факт вызова. `exists_in_community`
+§18.2: проверяется текст запроса, а не факт вызова. `exists_in_city`
 существует ровно ради понятной ошибки на дешёвом пути (D-4), и его
 единственная ценность — оба условия в `WHERE`. Мутация «убрать
-`community_slug`» превращает проверку в «место с таким именем есть
+`city_slug`» превращает проверку в «место с таким именем есть
 в любом сообществе» и делает её красной.
 
 `§18.3`: гонку двух вставок в одной сессии доказать нельзя, поэтому
-корректность держит `uq_places_community_name` (проверяется в
+корректность держит `uq_places_city_name` (проверяется в
 интеграционных тестах), а здесь проверяется только запрос.
 """
 
@@ -19,17 +19,17 @@ from typing import Any
 from app.repositories.places import PlaceRepository
 
 
-def test_exists_in_community_filters_by_both_columns() -> None:
+def test_exists_in_city_filters_by_both_columns() -> None:
     """AC-04: запрос проверки дубля содержит оба условия.
 
-    Краснеет, если убрать `community_slug`: места с одинаковым названием
+    Краснеет, если убрать `city_slug`: места с одинаковым названием
     в разных сообществах (AC-04 явно разрешает) считались бы дублями,
     и админка 3.2 отказывала бы на легальном вводе.
     """
     statement = PlaceRepository.build_exists_statement("tomsk", "Кафе „Прага“")
     sql = str(statement)
 
-    assert "places.community_slug" in sql
+    assert "places.city_slug" in sql
     assert "places.name" in sql
     assert " AND " in sql
 
@@ -77,7 +77,7 @@ def test_exists_excluding_statement_excludes_own_uuid() -> None:
     sql = str(compiled)
     where = sql.split("WHERE", 1)[1]
 
-    assert "places.community_slug" in where
+    assert "places.city_slug" in where
     assert "places.name" in where
     assert "places.uuid" in where
     assert "!=" in where
@@ -115,7 +115,7 @@ class _RowResult:
 async def test_duplicate_lookup_sends_order_by_to_database() -> None:
     """QD B1 (CR 3.2): РЕАЛЬНЫЙ метод поиска дубля шлёт `ORDER BY` в БД.
 
-    §18.1: КРАСНЕЕТ от отката `ORDER BY` в `find_by_community_and_name` —
+    §18.1: КРАСНЕЕТ от отката `ORDER BY` в `find_by_city_and_name` —
     на двух совпадениях `limit(1)` возвращает произвольную строку, и
     `details.existing_uuid` в `PLACE_ARCHIVED` указывает на случайное место:
     админ «восстанавливает» не то, а имя остаётся занятым.
@@ -128,7 +128,7 @@ async def test_duplicate_lookup_sends_order_by_to_database() -> None:
     session = _CapturingSession(row=None)
     repository = PlaceRepository(session)  # type: ignore[arg-type]
 
-    await repository.find_by_community_and_name("tomsk", "Кафе „Прага“")
+    await repository.find_by_city_and_name("tomsk", "Кафе „Прага“")
 
     assert session.statements, "метод не обратился к БД — тест ничего не проверил"
     sql = str(session.statements[0])
@@ -147,7 +147,7 @@ async def test_excluding_lookup_sends_same_order_by_to_database() -> None:
     session = _CapturingSession(row=None)
     repository = PlaceRepository(session)  # type: ignore[arg-type]
 
-    await repository.exists_in_community_excluding("tomsk", "Кафе „Прага“", uuid_lib.uuid4())
+    await repository.exists_in_city_excluding("tomsk", "Кафе „Прага“", uuid_lib.uuid4())
 
     assert session.statements, "метод не обратился к БД — тест ничего не проверил"
     sql = str(session.statements[0])

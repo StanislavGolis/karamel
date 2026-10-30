@@ -30,6 +30,10 @@ def _item(**overrides: object) -> CardRequestsItem:
         "submitted_at": datetime(2026, 10, 24, 12, 0, tzinfo=UTC),
         "message": "пойдём вместе",
         "person": _person(),
+        # AC-3 стори 12.6: поле ОБЯЗАТЕЛЬНОЕ (без умолчания) — «забыли
+        # заполнить» не должно быть неотличимо от «вне рамок». `None` =
+        # у карточки рамок нет.
+        "within_bounds": True,
     }
     base.update(overrides)
     return CardRequestsItem(**base)  # type: ignore[arg-type]

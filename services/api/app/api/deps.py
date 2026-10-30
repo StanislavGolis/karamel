@@ -24,8 +24,10 @@ from app.core.db import get_session
 from app.core.security import InvalidTokenError, decode_access_token
 from app.models.enums import UserRole
 from app.models.user import User
+from app.repositories.profiles import ProfileRepository
 from app.repositories.users import UserRepository
 from app.services.account_deletion_service import deletion_window_expired
+from app.services.age_service import compute_age, is_adult, today_or_now
 from app.services.session_service import ACCESS_COOKIE_NAME
 
 UNAUTHENTICATED = {"code": "unauthenticated"}
@@ -152,16 +154,37 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 # там это ошибка входных данных формы, здесь — запрет доступа к ресурсу.
 CONSENT_REQUIRED = {"code": "consent_required"}
 
+# Стори 12.2, AC-4: закрытый конверт отказа «менее 18 лет».
+# Отдельный код, а не `consent_required`: причины разные, и клиент должен
+# показать разное — «пройдите согласие» и «регистрация с 18 лет».
+UNDERAGE = {"code": "underage"}
 
-async def get_current_user_with_consent(user: CurrentUser) -> User:
-    """CR 2.1, Решение 2 (FR9, 152-ФЗ): доступ к анкете только после 18+ и согласия.
+
+async def get_current_user_with_consent(
+    user: CurrentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> User:
+    """CR 2.1, Решение 2 (FR9, 152-ФЗ) + стори 12.2 (AC-4): 18+ и согласие.
 
     Проблема, которую закрывает зависимость: `get_current_user` проверяет
     сессию и бан, но не согласие. Правило «18+ и согласие» жило только
     в Next-гарде, и прямой вызов API с украденной cookie отдавал имя, город,
     возраст и био пользователя, не давшего согласия на обработку ПД.
 
-    Проверяются оба факта, а не только `consent_given_at`: CHECK
+    **Стори 12.2 меняет источник истины для «18+».** До неё возраст был
+    декларацией: флажок `age_confirmed` при регистрации, который никто
+    не проверял и который никогда не пересматривался. Теперь, если у анкеты
+    есть `birth_date`, возраст **вычисляется** и проверяется здесь.
+
+    Порядок источников (AC-5, grandfathering) — от проверяемого к декларации:
+
+    1. `profiles.birth_date` есть → решает он;
+    2. `birth_date` нет, но есть `profiles.age` → решает legacy-число
+       (40 008 учёток: даты рождения нет и появиться не может);
+    3. анкеты нет вовсе → решает `age_confirmed` (онбординг не пройден;
+       отказ здесь запер бы пользователя: форму анкеты не открыть).
+
+    Проверяются оба факта согласия, а не только `consent_given_at`: CHECK
     `ck_users_consent_pair` (миграция 0003) держит их парой, но зависимость
     не должна полагаться на инвариант, который проверяется в другой таблице.
 
@@ -171,6 +194,23 @@ async def get_current_user_with_consent(user: CurrentUser) -> User:
     """
     if not user.age_confirmed or user.consent_given_at is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=CONSENT_REQUIRED)
+
+    # AC-4: проверяемый возраст приоритетнее декларации. Профиль читается
+    # на каждом запросе к UGC — это один лишний SELECT по уникальному
+    # индексу `uq_profiles_user_id`; цена ниже, чем доступ несовершеннолетнего.
+    profile = await ProfileRepository(session).get_by_user_id(user.id)
+    if profile is None:
+        # AC-5: анкеты нет — онбординг не пройден, отказывать нечему.
+        return user
+
+    age = compute_age(profile.birth_date, profile.age, today_or_now())
+    # **Неизвестный возраст — не отказ.** Черновик анкеты (загружено фото,
+    # текст ещё не заполнен) не содержит ни даты, ни числа. Отказывать здесь
+    # значило бы запереть онбординг: форму анкеты не открыть, фото не
+    # загрузить, из круга не выйти. В этом случае действует декларация
+    # `age_confirmed`, уже проверенная выше (AC-5: grandfathering).
+    if age is not None and not is_adult(age):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=UNDERAGE)
     return user
 
 

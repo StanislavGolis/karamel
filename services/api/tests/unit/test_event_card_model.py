@@ -24,7 +24,7 @@ def _card(**overrides: object) -> EventCard:
     values: dict[str, object] = {
         "author_id": 1,
         "place_id": 1,
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
         "title": "Настольные игры в „Праге“",
         "category": "cafe",
         "starts_at": starts_at,
@@ -79,7 +79,7 @@ def test_constraint_names_follow_naming_convention() -> None:
         "ck_event_cards_filled_count",
         "ck_event_cards_decision_window",
         "ck_event_cards_expires_at",
-        "ck_event_cards_community_slug",
+        "ck_event_cards_city_slug",
         "ck_event_cards_published",
         "ck_event_cards_rejection_reason",
         "ck_event_cards_full_capacity",
@@ -116,7 +116,7 @@ def test_index_names_are_full_strings() -> None:
     names = {index.name for index in EventCard.__table__.indexes}
 
     assert names == {
-        "ix_event_cards_community_starts",
+        "ix_event_cards_city_starts",
         "ix_event_cards_author_active",
         "ix_event_cards_pending_verification",
         "ix_event_cards_due_windows",

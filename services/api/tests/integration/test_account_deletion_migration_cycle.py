@@ -35,11 +35,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import command
+from tests.conftest import HEAD_REVISION
 
 pytestmark = [
     pytest.mark.integration,
+    # Стори 12.9 (AC-4, W-11.4-d): DDL на общей схеме — несовместим с xdist.
+    pytest.mark.ddl,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
+
 
 API_ROOT = Path(__file__).resolve().parents[2]
 
@@ -107,7 +111,7 @@ def test_0033_is_single_head_and_its_down_revision_is_0032() -> None:
     чужую миграцию.
     """
     script = ScriptDirectory.from_config(_config())
-    assert tuple(script.get_heads()) == ("0033",)
+    assert tuple(script.get_heads()) == (HEAD_REVISION,)
     revision = script.get_revision("0033")
     assert revision.down_revision == "0032"
 
@@ -124,7 +128,7 @@ def test_index_exists_and_is_partial() -> None:
     полный индекс был бы вдвое дороже при той же селективности. Проверяется
     текстом `indexdef`, потому что `to_regclass` частичность не видит.
     """
-    assert _revision() == "0033"
+    assert _revision() == HEAD_REVISION
     definition = _indexdef(_INDEX)
     assert definition is not None, "индекс не создан миграцией 0033"
     assert "deletion_requested_at" in definition
@@ -152,7 +156,7 @@ def test_downgrade_removes_index_and_upgrade_restores_it() -> None:
 
     command.upgrade(_config(), "head")
 
-    assert _revision() == "0033"
+    assert _revision() == HEAD_REVISION
     restored = _indexdef(_INDEX)
     assert restored is not None
     assert "WHERE" in restored.upper()

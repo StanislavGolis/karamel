@@ -23,6 +23,13 @@ export type CardRead = {
   title: string;
   description: string | null;
   category: string;
+  /**
+   * Стори 12.4 (AC-7, FR117/FR118): тип и занятие в контракте ответа.
+   * `kind` — только `date`/`company`; `activity` — белый список FR118
+   * плюс легаси `other` у старых карточек.
+   */
+  kind: "date" | "company";
+  activity: string;
   starts_at: string;
   expires_at: string;
   /**
@@ -33,6 +40,20 @@ export type CardRead = {
   server_time: string;
   capacity: number;
   filled_count: number;
+  /**
+   * Стори 12.6 (AC-2a, FR119, ADR-19): рамки аудитории видны ДО подачи.
+   *
+   * Мягкий фильтр: карточка видна всем, заявку подать может любой (FR81).
+   * Поля приходят в ответе всегда, `null` означает «рамка не задана» —
+   * показывать «ищу любого» не нужно, это отсутствие ограничения, а не
+   * намерение автора (UX §1048: «только если задано»).
+   *
+   * Признака «ты вне рамок» здесь НЕТ и быть не должно: сервер отдаёт его
+   * только автору (AC-4), заявитель отказ не персонализирует.
+   */
+  gender_filter: "female" | "male" | null;
+  age_min: number | null;
+  age_max: number | null;
   status: "draft" | "published" | "full" | "closed" | "finished" | "cancelled";
   verification_status: string;
   created_at: string;
@@ -51,6 +72,10 @@ export type CardRead = {
    * не предполагает участия через `join` (FR70: там заявки).
    */
   viewer_participates: boolean;
+  /** AC-2 стори 11.5 (FR82): «моя заявка» — `pending`-заявка зрителя. */
+  viewer_requested: boolean;
+  /** AC-5 (FR82): `uuid` заявки — адрес `DELETE /requests/{uuid}`. */
+  viewer_request_uuid: string | null;
 };
 
 /** Конверт выдачи §4: `{items, total, cursor}`. */
@@ -65,6 +90,14 @@ export type CardFeedParams = {
   category?: string | null;
   hasSeats?: boolean;
   cursor?: string | null;
+  /**
+   * Стори 12.4 (AC-5, FR117/FR118): фильтры по смыслу встречи.
+   *
+   * Независимы друг от друга и от `category`: сервер применяет их как
+   * конъюнкцию (два `WHERE`), поэтому `kind`+`activity` сужают выдачу.
+   */
+  kind?: string | null;
+  activity?: string | null;
 };
 
 /**
@@ -82,6 +115,10 @@ export async function fetchCards(
   if (params.category) query.set("category", params.category);
   if (params.hasSeats) query.set("has_seats", "true");
   if (params.cursor) query.set("cursor", params.cursor);
+  // Стори 12.4 (AC-5): фильтры смысла встречи. Пустая строка — «нет фильтра»,
+  // поэтому проверка на truthy, а не на `!== undefined`.
+  if (params.kind) query.set("kind", params.kind);
+  if (params.activity) query.set("activity", params.activity);
   const suffix = query.toString();
 
   let response: Response;
@@ -276,4 +313,81 @@ export async function selectRequest(
   }
   if (!response.ok) return readErrorCode(response);
   return { ok: true, data: (await response.json()) as SelectRequestResult };
+}
+
+/**
+ * AC-2 стори 11.5 (FR76, FR82): подача заявки на карточку режима «заявки».
+ *
+ * **Почему не переиспользован `joinCard`.** Маршруты разные (`/join` vs
+ * `/requests`), и тело запроса тоже: `joinCard` шлёт ПУСТОЙ `POST`, а здесь
+ * обязательное `{message}`. Общий хелпер с необязательным телом скрыл бы
+ * разницу: вызов без сообщения выглядел бы легальным и падал бы `422` на
+ * сервере вместо того, чтобы не компилироваться.
+ *
+ * `201` с телом `JoinRequestRead` не разбирается: экран перечитывает карточку
+ * (`router.refresh()`) и не держит второго представления ресурса — тот же
+ * приём, что у `joinCard` (`204`, `data: null`).
+ *
+ * Коды отказа доходят до экрана как есть (`LIMIT_REACHED`, `ALREADY_REQUESTED`,
+ * `CARD_NOT_ACCEPTING`, `CAPACITY_ONE_USES_REQUESTS`, `network_error`): текст
+ * выбирает компонент, сервер не знает, где показывается отказ.
+ */
+export async function submitJoinRequest(
+  uuid: string,
+  message: string,
+): Promise<{ ok: true; data: null } | { ok: false; code: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/proxy/cards/${encodeURIComponent(uuid)}/requests`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        accept: "application/json",
+        // Без явного `content-type` BFF принял бы тело строкой и вернул `422`
+        // на валидном вводе (тот же дефект, что в форме создания 4.2).
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ message }),
+    });
+  } catch {
+    // AC-8: сеть недоступна — машинный код, а не исключение: форма покажет
+    // «Нет связи» и СОХРАНИТ ввод (§8.4 п.3).
+    return { ok: false, code: "network_error" };
+  }
+  if (!response.ok) return readErrorCode(response);
+  return { ok: true, data: null };
+}
+
+/**
+ * AC-5 стори 11.5 (FR82): отмена своей заявки до решения автора.
+ *
+ * `DELETE /requests/{uuid}`, а не `/cards/{uuid}/requests`: решение
+ * принимается НАД заявкой, и участник знает её `uuid` из контракта карточки
+ * (`viewer_request_uuid`). Второй адрес на то же действие дал бы два
+ * источника правды для одного перехода.
+ *
+ * `204` без тела: `data: null`. Повторная отмена — тоже `204`
+ * (идемпотентность 5а.6), поэтому обрыв сети после `commit` не выглядит
+ * сбоем прошедшей операции.
+ *
+ * `REQUEST_SELECTED` (`409`) доходит кодом: выбранную заявку отменить
+ * нельзя, и UI обязан не показывать кнопку отмены для `selected`. Сервер всё
+ * равно проверяет — клиентская проверка только убирает заведомо провальное
+ * действие.
+ */
+export async function cancelJoinRequest(
+  requestUuid: string,
+): Promise<{ ok: true; data: null } | { ok: false; code: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/proxy/requests/${encodeURIComponent(requestUuid)}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    });
+  } catch {
+    return { ok: false, code: "network_error" };
+  }
+  if (!response.ok) return readErrorCode(response);
+  return { ok: true, data: null };
 }

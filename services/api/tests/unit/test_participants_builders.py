@@ -35,7 +35,7 @@ def test_participants_statement_selects_only_selected() -> None:
     Краснеет от мутации M1 (`status <> 'not_selected'`): инверсия впустила бы
     `pending`-заявителя в состав компании, которой ещё нет (FR30, FR81).
     """
-    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, community_slug="tomsk"))
+    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, city_slug="tomsk"))
 
     assert "join_requests.status = 'selected'" in sql
     assert "not_selected" not in sql
@@ -52,7 +52,7 @@ def test_participants_statement_orders_by_submitted_at_then_id() -> None:
     Краснеет от мутации M3 (снять `ORDER BY`): состав отдавался бы в
     физическом порядке строк, и два запроса давали бы разные списки.
     """
-    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, community_slug="tomsk"))
+    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, city_slug="tomsk"))
 
     assert "order by" in sql
     order_clause = sql.split("order by", 1)[1]
@@ -70,7 +70,7 @@ def test_participants_statement_has_no_stored_membership_columns() -> None:
     Краснеет, если состав начнут читать из денормализованной колонки: она
     разошлась бы с `join_requests` при отмене участия (5а.6).
     """
-    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, community_slug="tomsk"))
+    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, city_slug="tomsk"))
 
     for forbidden in ("user_a_id", "user_b_id", "participant_id", "members"):
         assert forbidden not in sql, forbidden
@@ -79,15 +79,15 @@ def test_participants_statement_has_no_stored_membership_columns() -> None:
 # ——— U4: срез сообщества — второй рубеж ADR-13 ———
 
 
-def test_participants_statement_slices_community() -> None:
+def test_participants_statement_slices_city() -> None:
     """AC-02, ADR-13: срез сообщества живёт в SQL.
 
     Второй рубеж на случай ошибки сервиса: без среза состав чужой карточки
     читался бы по прямому `uuid`.
     """
-    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, community_slug="tomsk"))
+    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, city_slug="tomsk"))
 
-    assert "event_cards.community_slug" in sql
+    assert "event_cards.city_slug" in sql
     assert "'tomsk'" in sql
 
 
@@ -100,7 +100,7 @@ def test_participants_statement_joins_profile_left() -> None:
     Краснеет от INNER JOIN: участник без анкеты выпал бы из состава, и
     компания «потеряла» бы человека, который в ней реально состоит.
     """
-    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, community_slug="tomsk"))
+    sql = _sql(ChatRepository.build_participants_statement(card_id=CARD_ID, city_slug="tomsk"))
 
     assert "left outer join profiles" in sql
     assert "join users" in sql

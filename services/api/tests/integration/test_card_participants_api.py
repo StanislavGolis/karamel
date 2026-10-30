@@ -93,8 +93,8 @@ async def fake_media(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FakeMedia
 # ——— посев —————————————————————————————————————————————————————————————————
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 async def _new_user(session: AsyncSession) -> tuple[User, str]:
@@ -117,10 +117,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _city()},
     )
     return int(row.scalar_one())
 
@@ -131,17 +131,17 @@ async def _insert_card(
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, 60, "
-            ":expires, 'full', :filled, 'approved', :published_at) "
+            ":expires, 'full', :filled, 'approved', :published_at, 'company', 'coffee') "
             "RETURNING uuid, id"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": _community(),
+            "slug": _city(),
             "starts": starts,
             "capacity": capacity,
             "expires": starts - timedelta(hours=1),

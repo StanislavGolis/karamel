@@ -63,8 +63,8 @@ class ReportSettings:
     заглушка падала бы `AttributeError` на живом коде — тест проверял бы себя.
     """
 
-    default_community_slug = "tomsk"
-    community_slugs = ("tomsk",)
+    default_city_slug = "tomsk"
+    city_slugs = ("tomsk",)
     card_default_decision_window_minutes = 60
     card_content_stop_words: tuple[str, ...] = ()
     card_active_limit = 5
@@ -130,10 +130,10 @@ async def make_company(
 
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     place_id = int(place.scalar_one())
 
@@ -141,16 +141,16 @@ async def make_company(
     capacity = members + 1
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:a, :p, :s, 'Встреча', NULL, 'cafe', :st, :cap, 60, :e, :status, "
-            ":filled, 'approved', :pub) RETURNING uuid, id"
+            ":filled, 'approved', :pub, 'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "a": author.id,
             "p": place_id,
-            "s": settings.default_community_slug,
+            "s": settings.default_city_slug,
             "st": starts_at,
             "cap": capacity,
             "e": starts_at - timedelta(hours=1),

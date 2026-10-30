@@ -29,9 +29,11 @@ import uuid as uuid_lib
 from datetime import datetime
 from typing import Literal, cast
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.repositories.access_logs import AccessLogRepository
 from app.repositories.reports import ReportsRepository
 from app.repositories.sanctions import SanctionsRepository
@@ -46,6 +48,10 @@ from app.schemas.moderation_user import (
     SanctionsBlock,
 )
 from app.schemas.report import Resolution
+from app.services.age_service import compute_age, today_or_now
+from app.services.media_service import MediaStorageError, MediaUnavailableError, get_signed_url
+
+logger = structlog.get_logger(__name__)
 
 __all__ = [
     "CARD_ATTENDANCE_LIMIT",
@@ -92,14 +98,27 @@ _RESOLVE_SQL = "SELECT id, uuid FROM users WHERE uuid = :uuid"
 #: заполнить анкету; `JOIN` выбросил бы строку, и такой пользователь
 #: получил бы `404` вместо `200` с пустыми полями (AC-14).
 #:
-#: Отдаются РОВНО шесть полей (D-66, NFR27): ни `phone`, ни `provider`,
-#: ни `bio`, ни фото. `bio` — пользовательский контент с отдельной очередью
-#: модерации (эпик 3), а идентификаторы входа — ключ к аккаунту, не основание
-#: для решения.
+#: Отдаются РОВНО девять полей (D-66, NFR27 + 11.4 AC-6 + 12.10 AC-1): ни
+#: `phone`, ни `provider`, ни `bio`, ни `storage_key`. Седьмое —
+#: `consent_version` (NFR36): не идентификатор и не контакт, а факт согласия,
+#: который владелец обязан видеть. Восьмое-девятое — `photo_url` и
+#: `photo_expires_in` из LATERAL-подзапроса ниже: подписанный URL главного
+#: ОДОБРЕННОГО фото (D-12.10-1), а не сам ключ (D-11). `bio` —
+#: пользовательский контент с отдельной очередью модерации (эпик 3), а
+#: идентификаторы входа — ключ к аккаунту, не основание для решения.
 _PROFILE_SQL = """
-SELECT u.uuid, p.name, p.city, p.age, u.gender, u.status
+SELECT u.uuid, p.name, p.city, p.age, u.gender, u.status, u.consent_version,
+       p.birth_date, photo.storage_key
   FROM users AS u
   LEFT JOIN profiles AS p ON p.user_id = u.id
+  LEFT JOIN LATERAL (
+    SELECT ph.storage_key
+      FROM profile_photos AS ph
+     WHERE ph.profile_id = p.id
+       AND ph.status = 'approved'
+     ORDER BY ph.position
+     LIMIT 1
+  ) AS photo ON true
  WHERE u.id = :user_id
 """
 
@@ -230,14 +249,51 @@ async def load_user_card(
         # действительно открывал карточку, и факт попытки — часть аудита.
         raise UserNotFoundError()
 
+    # Стори 12.10 (AC-9, AC-10, D-12.10-3): подпись главного одобренного фото.
+    # `LEFT JOIN LATERAL` в `_PROFILE_SQL` вернул `storage_key` (индекс 8) или
+    # `NULL`, если одобренных фото нет.
+    #
+    # **Сбой хранилища не валит карточку.** Модератор обязан видеть анкету и
+    # историю нарушений, даже если S3 лежит: без фото разбор возможен, без
+    # имени и жалоб — нет. `MediaUnavailableError` (реквизиты не заданы —
+    # штатное состояние dev/стейджа) НЕ наследник `MediaStorageError`, и без
+    # второй ветки он уходил бы в общий обработчик → `500` на весь экран
+    # (приём `_sign_photos`, 5а.4). URL не логируется никогда (D-11).
+    storage_key: str | None = profile_row[8]
+    photo_url: str | None = None
+    photo_ttl: int | None = None
+    if storage_key is not None:
+        try:
+            photo_ttl = settings.s3_signed_url_ttl
+            photo_url = get_signed_url(storage_key, ttl=photo_ttl)
+        except (MediaStorageError, MediaUnavailableError):
+            logger.warning(
+                "moderation_user_card.photo.sign_failed", subject_uuid=str(profile_row[0])
+            )
+            photo_url = None
+            photo_ttl = None
+
     return ModerationUserCard(
         profile=ModerationUserProfile(
             uuid=profile_row[0],
             name=profile_row[1],
             city=profile_row[2],
-            age=profile_row[3],
+            # Стори 12.2, AC-3: наружу — вычисленный возраст, а не колонка.
+            # `birth_date` (индекс 7) приоритетнее legacy-`age` (индекс 3):
+            # у новых учёток колонка `age` — `NULL`, и прямое чтение
+            # отдавало бы модератору `null` вместо возраста.
+            age=compute_age(profile_row[7], profile_row[3], today_or_now()),
             gender=profile_row[4],
             status=profile_row[5],
+            # Стори 11.4 (AC-6, NFR36): индекс 6 — `u.consent_version`
+            # из `_PROFILE_SQL`. `None` здесь честно означает «версия
+            # неизвестна» (учётка до миграции `0034`), а не ошибку.
+            consent_version=profile_row[6],
+            # Стори 12.10 (AC-9, AC-10, D-5a.4-6): ссылка и срок — вместе или
+            # никак. `photo_expires_in` при `photo_url is None` был бы обещанием
+            # ссылки, которой нет (тот же инвариант, что в `EventCardAuthorProfile`).
+            photo_url=photo_url,
+            photo_expires_in=photo_ttl if photo_url is not None else None,
         ),
         reports=ReportsBlock(
             filed=[_report_brief(r) for r in filed_rows],

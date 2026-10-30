@@ -69,10 +69,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_community_slug},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_city_slug},
     )
     return int(row.scalar_one())
 
@@ -90,16 +90,17 @@ async def _insert_card(
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, :title, NULL, 'cafe', :starts, :capacity, 60, "
-            ":expires, :status, :filled, 'approved', :published_at) RETURNING uuid, id"
+            ":expires, :status, :filled, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": settings.default_community_slug,
+            "slug": settings.default_city_slug,
             "title": title,
             "starts": starts,
             "capacity": capacity,
@@ -243,11 +244,15 @@ async def test_feed_resolves_participation_with_one_batch_query(
         event.remove(connection.sync_connection, "before_cursor_execute", _capture)
 
     assert response.status_code == 200, response.text
+    # Стори 11.5 добавила ВТОРОЙ признак зрителя (`viewer_requested`), но
+    # считается он ТЕМ ЖЕ запросом: число SQL на `GET /cards/{uuid}` и на
+    # ленту зафиксировано контрактом анти-оракула
+    # (`test_oracle_exact_query_count`). Отдельный `SELECT` на второй признак
+    # краснил бы его при верном JSON — поэтому ожидание осталось ровно 1.
     participation_queries = [
         sql
         for sql in statements
-        if "join_requests" in sql.lower()
-        and "card_id in (" in sql.lower().replace(" ", " ").lower()
+        if "join_requests" in sql.lower() and "card_id in (" in sql.lower()
     ]
     assert len(participation_queries) == 1, participation_queries
 

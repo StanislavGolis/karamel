@@ -95,20 +95,20 @@ async def _seed(
         user_row = await session.execute(
             text(
                 "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
-                "community_slug) VALUES ('phone', :pid, :phone, 'user', 'female', 'active', :slug) "
+                "city_slug) VALUES ('phone', :pid, :phone, 'user', 'female', 'active', :slug) "
                 "RETURNING id"
             ),
-            {"pid": phone, "phone": phone, "slug": settings.default_community_slug},
+            {"pid": phone, "phone": phone, "slug": settings.default_city_slug},
         )
         author_id = int(user_row.scalar_one())
         _CREATED_USERS.append(author_id)
 
         place_row = await session.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
             ),
-            {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_community_slug},
+            {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_city_slug},
         )
         place_id = int(place_row.scalar_one())
         _CREATED_PLACES.append(place_id)
@@ -116,16 +116,16 @@ async def _seed(
         now = datetime.now(UTC)
         card_row = await session.execute(
             text(
-                "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+                "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
                 "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-                "filled_count, verification_status, published_at) "
+                "filled_count, verification_status, published_at, kind, activity) "
                 "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, 1, 60, "
-                ":expires, :status, 0, 'approved', :published_at) RETURNING id"
+                ":expires, :status, 0, 'approved', :published_at, 'company', 'coffee') RETURNING id"
             ),
             {
                 "author": author_id,
                 "place": place_id,
-                "slug": settings.default_community_slug,
+                "slug": settings.default_city_slug,
                 "starts": now + timedelta(days=3),
                 "expires": now + timedelta(minutes=expires_minutes),
                 "status": status,

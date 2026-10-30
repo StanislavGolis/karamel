@@ -255,6 +255,18 @@ class CardRequestsItem(BaseModel):
     # настоящий текст `pending`-заявки.
     message: str | None = None
     person: CardRequestsPerson
+    # AC-3 стори 12.6 (FR119, ADR-19): проходит ли заявитель рамки карточки.
+    #
+    # **Поле обязательное — без умолчания.** Умолчание `True` сделало бы
+    # «вне рамок» и «забыли заполнить» неотличимыми, а умолчание `None`
+    # маскировало бы забытую передачу в сборке: `None` здесь означает ровно
+    # одно — «у карточки рамок нет» (см. `EventCard.has_audience_bounds`).
+    #
+    # **Только в ответе автору.** В `MyRequestItem` (`GET /my/requests`) этого
+    # поля НЕТ и быть не должно (AC-4): заявитель не узнаёт, что его отсеяли
+    # по возрасту или полу, — отказ безличен (FR81). Замок —
+    # `tests/unit/test_within_bounds_not_in_my_requests.py`.
+    within_bounds: bool | None
 
 
 class CardRequestsResponse(BaseModel):

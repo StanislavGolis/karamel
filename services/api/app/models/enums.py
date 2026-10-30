@@ -518,3 +518,58 @@ TICKET_STATUSES: tuple[TicketStatus, ...] = (
     TicketStatus.ANSWERED,
     TicketStatus.CLOSED,
 )
+
+
+class CardKind(StrEnum):
+    """Стори 12.4 (AC-1; FR117, ADR-20): тип встречи, выбранный автором явно.
+
+    D-3: `text` + `CHECK`, не PG-enum — набор меняется миграцией без `ALTER TYPE`.
+
+    **Тип НЕ выводится из `capacity`** (FR117, AC-4). `capacity` определяет
+    механику присоединения (заявки при 1 / открытый набор при 2–6), `kind` —
+    смысл встречи. Связка «`capacity=1` → `date`» запрещена продуктово: автор
+    вправе собрать компанию из одного собеседника.
+    """
+
+    DATE = "date"
+    COMPANY = "company"
+
+
+class Activity(StrEnum):
+    """Стори 12.4 (AC-1; FR118, ADR-20): активность встречи — белый список.
+
+    D-3: `text` + `CHECK`, не PG-enum.
+
+    **`OTHER` — легаси-значение, а не седьмая активность.** Миграция `0037`
+    заполняет им существующие карточки, у которых активности не было
+    (выдумать конкретную значило бы соврать в содержании ленты). На входе
+    `other` запрещён: `ACTIVITY_INPUT_VALUES` содержит ровно шесть значений
+    FR118, и валидаторы схем отвечают `422 activity_other_reserved`.
+
+    Прецедент того же решения — `PlaceCategory.OTHER`: легаси-значение
+    в белом списке, не выбираемое из формы.
+    """
+
+    COFFEE = "coffee"
+    WALK = "walk"
+    BAR = "bar"
+    CINEMA = "cinema"
+    BOARDGAMES = "boardgames"
+    SPORT = "sport"
+    #: Легаси: только из миграции `0037`, на вход не принимается.
+    OTHER = "other"
+
+
+#: Стори 12.4 (AC-3; FR118): что автор МОЖЕТ выбрать. Единственный источник
+#: для валидаторов схем — без `OTHER` осознанно (см. докстринг `Activity`).
+#: Отдельная константа, а не `tuple(Activity)[:-1]`: срез по позиции сломается
+#: при добавлении значения в середину списка, и валидатор молча пропустит
+#: легаси или запретит легальную активность.
+ACTIVITY_INPUT_VALUES: tuple[Activity, ...] = (
+    Activity.COFFEE,
+    Activity.WALK,
+    Activity.BAR,
+    Activity.CINEMA,
+    Activity.BOARDGAMES,
+    Activity.SPORT,
+)

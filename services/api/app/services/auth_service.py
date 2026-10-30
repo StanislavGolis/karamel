@@ -49,9 +49,9 @@ async def resolve_phone_user(session: AsyncSession, phone: str) -> tuple[User, b
     Поиск идёт по паре `(provider, provider_user_id)` — через существующий метод,
     без второго пути уникальности.
 
-    Стори 10.1, D-10.1-5, задача 4.6: `community_slug` здесь НЕ передаётся.
+    Стори 10.1, D-10.1-5, задача 4.6: `city_slug` здесь НЕ передаётся.
     Слаг подставляет `UserRepository.create()` из
-    `settings.default_community_slug` (ADR-01: при записи — из конфига, не от
+    `settings.default_city_slug` (ADR-01: при записи — из конфига, не от
     клиента). Второй источник здесь дал бы расхождение с fallback'ом.
     """
     repository = UserRepository(session)

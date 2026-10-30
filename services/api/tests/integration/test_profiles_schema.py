@@ -36,6 +36,9 @@ EXPECTED_COLUMNS: dict[str, tuple[str, str]] = {
     "name": ("character varying", "YES"),
     "city": ("character varying", "YES"),
     "age": ("smallint", "YES"),
+    # Стори 12.2, AC-1: дата рождения. Колонка `age` остаётся legacy-fallback
+    # (ADR-17): у 40 008 анкет даты нет и восстановить её невозможно.
+    "birth_date": ("date", "YES"),
     "gender": ("character varying", "NO"),
     "bio": ("text", "YES"),
     "status": ("character varying", "NO"),

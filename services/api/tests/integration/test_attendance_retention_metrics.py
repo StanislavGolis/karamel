@@ -69,24 +69,24 @@ async def _card(
     """
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     place_id = int(place.scalar_one())
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at, created_at) "
+            "filled_count, verification_status, published_at, created_at, kind, activity) "
             "VALUES (:a, :p, :s, 'Встреча', NULL, 'cafe', :st, 2, 60, :e, 'full', 2, "
-            "'approved', :pub, :created) RETURNING id"
+            "'approved', :pub, :created, 'company', 'coffee') RETURNING id"
         ),
         {
             "a": author_id,
             "p": place_id,
-            "s": settings.default_community_slug,
+            "s": settings.default_city_slug,
             "st": starts_at,
             "e": starts_at - timedelta(hours=1),
             "pub": starts_at - timedelta(days=1),
@@ -211,10 +211,10 @@ async def test_created_before_starts_invariant(session: AsyncSession) -> None:
     author, token = await make_user(session)
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING uuid"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     place_uuid = place.scalar_one()
 
@@ -230,6 +230,9 @@ async def test_created_before_starts_invariant(session: AsyncSession) -> None:
                 json={
                     "title": "Настольные игры",
                     "category": "cafe",
+                    # Стори 12.4 (AC-3): тип и активность обязательны.
+                    "kind": "company",
+                    "activity": "boardgames",
                     "place_uuid": str(place_uuid),
                     "starts_at": (datetime.now(UTC) + timedelta(days=3)).isoformat(),
                     "capacity": 3,
@@ -241,6 +244,9 @@ async def test_created_before_starts_invariant(session: AsyncSession) -> None:
                 json={
                     "title": "Прошлая встреча",
                     "category": "cafe",
+                    # Стори 12.4 (AC-3): тип и активность обязательны.
+                    "kind": "company",
+                    "activity": "boardgames",
                     "place_uuid": str(place_uuid),
                     "starts_at": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
                     "capacity": 3,
@@ -265,24 +271,59 @@ async def test_created_before_starts_invariant(session: AsyncSession) -> None:
     assert row.scalar_one() is True
 
 
-# --- Task 6.4: тест-документ разрыва (W-10.6-a) ---
+# --- Task 6.4 → стори 11.7, Task 3: запрос за нижней границей отвергается ---
 
 
-async def test_metric_changes_when_window_starts_before_boundary(session: AsyncSession) -> None:
-    """W-10.6-a (Task 6.4): окно с `period_from < moment − 6 мес` меняет NFR3.
+async def _http_metrics(
+    session: AsyncSession,
+    token: str,
+    *,
+    period_from: datetime,
+    period_to: datetime,
+) -> Any:
+    """`GET /api/v1/metrics` настоящим HTTP-клиентом на переданной сессии.
 
-    ТЕСТ ЗЕЛЁНЫЙ: он фиксирует ФАКТ, а не одобряет его. Смысл — замок:
-    если поведение изменится (например, появятся снапшоты метрик или
-    ограничение `period_from` шестью месяцами), тест покраснеет и заставит
-    прочитать W-10.6-a в `deferred-work.md`.
+    Образец — `test_created_before_starts_invariant:224-251`: подмена
+    `get_session` и `ASGITransport` без поднятия сервера. Роутер обязан
+    отвечать `422`, а `422` — HTTP-семантика; `build_metrics` о кодах не
+    знает (project-context §6), поэтому проверка идёт через клиент, а не
+    через сервис.
+    """
+    async def _override() -> Any:
+        yield session
 
-    Здесь удаляемая карточка попадает в окно по `created_at` (создана 7
-    месяцев назад, окно начинается 8 месяцев назад). До прогона она в
-    знаменателе (строка `attendance` есть), после — исчезла. Значение
-    ДРУГОЕ. AC-04 при таком окне НЕ выполняется — это и есть разрыв.
+    app.dependency_overrides[get_session] = _override
+    transport = ASGITransport(app=app)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get(
+                "/api/v1/metrics",
+                params={"from": period_from.isoformat(), "to": period_to.isoformat()},
+                cookies={ACCESS_COOKIE_NAME: token},
+            )
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+
+async def test_request_before_boundary_is_rejected(session: AsyncSession) -> None:
+    """AC-1, AC-5 (стори 11.7): окно с `period_from < now − 6 мес` → `422`.
+
+    **Тест переписан, а не удалён.** До 11.7 он назывался
+    `test_metric_changes_when_window_starts_before_boundary` и фиксировал
+    разрыв `W-10.6-a`: значение NFR3 МЕНЯЛОСЬ после прогона ретенции.
+    Теперь такой запрос отвергается, поэтому утверждение другое — окно
+    НЕДОСТУПНО, и значения, которое могло бы измениться, не существует
+    вовсе. Это и есть `AC-04` стори 10.6, закрытый кодом, а не документом.
+
+    **Подготовка сохранена намеренно.** Карточка, созданная 210 дней назад,
+    и прогон `purge_expired_attendance` остаются: без них тест перестал бы
+    быть про ретенцию и стал бы тестом разбора даты. Проверяются оба
+    состояния — ДО прогона (карточка и её строка `attendance` ещё живы) и
+    ПОСЛЕ (ретенция их удалила): контракт держится на границе окна, а не на
+    содержимом базы.
     """
     moment = datetime.now(UTC)
-    author, _ = await make_user(session)
+    author, token = await make_user(session, role="moderator")
     participant, _ = await make_user(session)
     await _card(
         session,
@@ -295,13 +336,71 @@ async def test_metric_changes_when_window_starts_before_boundary(session: AsyncS
 
     period_from = moment - timedelta(days=240)
     period_to = moment - timedelta(days=1)
-    before = await _nfr3(session, period_from=period_from, period_to=period_to)
-    result = await purge_expired_attendance(session, moment=moment, limit=200)
-    after = await _nfr3(session, period_from=period_from, period_to=period_to)
 
-    assert result.deleted == 1
-    assert before != after, (
-        "разрыв W-10.6-a больше не воспроизводится — перечитать deferred-work.md "
-        "перед тем, как радоваться: возможно, окно ограничили и нужно обновить стори"
+    # Task 3.4: отказ ДО прогона ретенции — замок на контракте, не на данных.
+    before_purge = await _http_metrics(
+        session, token, period_from=period_from, period_to=period_to
     )
-    assert before[1] == 1 and after[1] == 0
+    assert before_purge.status_code == 422, before_purge.text
+    assert before_purge.json() == {"code": "period_too_old"}
+
+    result = await purge_expired_attendance(session, moment=moment, limit=200)
+    assert result.deleted == 1
+
+    # Task 3.3: тот же запрос ПОСЛЕ прогона — тот же отказ, а не `200`.
+    after_purge = await _http_metrics(
+        session, token, period_from=period_from, period_to=period_to
+    )
+    assert after_purge.status_code == 422, after_purge.text
+    assert after_purge.json() == {"code": "period_too_old"}
+
+
+async def test_period_starting_inside_six_months_is_allowed(session: AsyncSession) -> None:
+    """AC-1, Task 3.6: окно, начинающееся ВНУТРИ шести месяцев, → `200`.
+
+    **Почему не «ровно шесть месяцев».** Роутер берёт `datetime.now(UTC)` в
+    момент запроса, а тест захватил `moment` раньше. Разница в микросекунды
+    делала бы `moment − 6 мес` на волосок СТАРШЕ серверной границы, и тест
+    флейкал бы на часах (`freezegun` в проекте нет, и тянуть его ради одной
+    проверки дороже, чем отступ в сутки). Поэтому проверяются две стороны
+    с отступом: `− 6 мес + 1 сут` (внутри) здесь и `− 6 мес − 1 сут`
+    (снаружи) в тесте выше — его окно начинается за 240 сут.
+
+    Замок на границу `>=`/`>` проверяется именно этими двумя сторонами:
+    мутация «сдвинуть предел на сутки» краснит один из них.
+    """
+    moment = datetime.now(UTC)
+    _, token = await make_user(session, role="moderator")
+
+    boundary = await _boundary(session, moment)
+    response = await _http_metrics(
+        session,
+        token,
+        period_from=boundary + timedelta(days=1),
+        period_to=moment,
+    )
+    assert response.status_code == 200, response.text
+
+
+async def test_period_starting_one_hour_before_boundary_is_rejected(session: AsyncSession) -> None:
+    """AC-1, вторая сторона границы: `now − 6 мес − 1 час` → `422`.
+
+    **Зачем вторая сторона.** Замок «внутри границы → `200`» ловит только
+    мутацию «предел стал СТРОЖЕ» (сдвиг вперёд). Сдвиг назад («предел стал
+    мягче на сутки») оставлял бы его зелёным: окно `boundary + 1 сут` всё ещё
+    внутри. Отступ в час, а не в сутки, — потому что сдвиг на сутки вниз
+    обязан краснеть, а граница берётся по часам сервера в момент запроса:
+    час перекрывает разницу между `moment` теста и `now` роутера с запасом.
+    """
+    moment = datetime.now(UTC)
+    _, token = await make_user(session, role="moderator")
+
+    boundary = await _boundary(session, moment)
+    response = await _http_metrics(
+        session,
+        token,
+        period_from=boundary - timedelta(hours=1),
+        period_to=moment,
+    )
+    assert response.status_code == 422, response.text
+    assert response.json() == {"code": "period_too_old"}

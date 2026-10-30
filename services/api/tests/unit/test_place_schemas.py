@@ -23,7 +23,7 @@ def _payload(**overrides: object) -> dict[str, object]:
         "name": "Кафе „Прага“",
         "category": "cafe",
         "address_text": "пр. Ленина, 1",
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
     }
     base.update(overrides)
     return base
@@ -112,25 +112,25 @@ def test_length_limits_follow_column(field: str, limit: int) -> None:
 
 
 @pytest.mark.parametrize("value", ["Tomsk", "to", "tomsk!", "томск", ""])
-def test_community_slug_pattern_rejects_bad_values(value: str) -> None:
+def test_city_slug_pattern_rejects_bad_values(value: str) -> None:
     """AC-03: слаг сообщества подчиняется `^[a-z0-9_-]{3,64}$`.
 
-    Тот же шаблон стоит в `ck_places_community_slug`. Краснеет при удалении
+    Тот же шаблон стоит в `ck_places_city_slug`. Краснеет при удалении
     `pattern`: `Tomsk` прошёл бы схему и упал `CHECK`-ом в БД, а место
     легло бы в сообщество, которого нет в конфиге.
     """
     with pytest.raises(ValidationError):
-        PlaceCreate(**_payload(community_slug=value))
+        PlaceCreate(**_payload(city_slug=value))
 
 
-def test_community_slug_missing_is_rejected() -> None:
-    """AC-03: `community_slug` обязателен.
+def test_city_slug_missing_is_rejected() -> None:
+    """AC-03: `city_slug` обязателен.
 
     Краснеет, если дать полю значение по умолчанию: место без сообщества
     не видно ни в одной ленте, и понять это по ответу API невозможно.
     """
     payload = _payload()
-    payload.pop("community_slug")
+    payload.pop("city_slug")
 
     with pytest.raises(ValidationError):
         PlaceCreate(**payload)
@@ -202,7 +202,7 @@ def test_read_schema_accepts_orm_object() -> None:
         name="Кафе „Прага“",
         category="cafe",
         address_text="пр. Ленина, 1",
-        community_slug="tomsk",
+        city_slug="tomsk",
     )
     place.uuid = uuid_lib.uuid4()
     place.is_active = True
@@ -218,11 +218,11 @@ def test_read_schema_accepts_orm_object() -> None:
 # --- R-05 стори 3.2: перенос между сообществами запрещён --------------------------
 
 
-@pytest.mark.parametrize("extra", ["community_slug", "uuid", "id", "created_at", "updated_at"])
+@pytest.mark.parametrize("extra", ["city_slug", "uuid", "id", "created_at", "updated_at"])
 def test_update_schema_rejects_immutable_fields(extra: str) -> None:
     """AC-06, R-05: `PlaceUpdate` не принимает перенос и смену публичного id.
 
-    §18.1: краснеет, если вернуть `community_slug` в схему (или снять
+    §18.1: краснеет, если вернуть `city_slug` в схему (или снять
     `extra="forbid"`). Перенос места между сообществами ломает `uq`-пару
     и все сохранённые ссылки: карточки эпика 4 ссылаются на `places.uuid`,
     а место внезапно оказывается в чужой ленте.
@@ -235,13 +235,13 @@ def test_update_schema_rejects_immutable_fields(extra: str) -> None:
     assert excinfo.value.errors()[0]["type"] == "extra_forbidden"
 
 
-def test_update_schema_has_no_community_field() -> None:
-    """AC-06, R-05: поля `community_slug` в `PlaceUpdate` нет вовсе.
+def test_update_schema_has_no_city_field() -> None:
+    """AC-06, R-05: поля `city_slug` в `PlaceUpdate` нет вовсе.
 
     §18.1: краснеет, если поле вернуть. `extra="forbid"` и отсутствие поля
     работают вместе: клиент обязан получить `422`, а не «тихо проигнорировано».
     """
-    assert "community_slug" not in PlaceUpdate.model_fields
+    assert "city_slug" not in PlaceUpdate.model_fields
 
 
 def test_update_schema_allows_is_active() -> None:

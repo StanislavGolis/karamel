@@ -258,7 +258,7 @@ export function ChatList() {
           type="button"
           onClick={() => void loadMore()}
           disabled={loadingMore}
-          className="min-h-11 self-center rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface disabled:opacity-60"
+          className="min-h-11 self-center rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface-hover disabled:opacity-60"
         >
           {loadingMore ? "Загружаем…" : "Ещё"}
         </button>

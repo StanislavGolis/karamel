@@ -2,7 +2,7 @@
 
 project-context §6: цепочка «роутер → сервис → репозиторий». Здесь только
 запросы — ни правил домена, ни HTTP-кодов. Правило «дубль запрещён» живёт
-в сервисе (`PlaceService`) и в БД (`uq_places_community_name`), а не тут.
+в сервисе (`PlaceService`) и в БД (`uq_places_city_name`), а не тут.
 
 D-4: сессия передаётся аргументом — репозиторий не создаёт её сам, иначе
 составная операция перестаёт быть одной транзакцией.
@@ -13,7 +13,7 @@ D-4: сессия передаётся аргументом — репозито
 Строители запросов (`build_*`) — статические: текст условия проверяется
 unit-тестом без БД (§18.2). Гонку двух вставок в одной сессии доказать
 нельзя (§18.3), поэтому корректность запрета дубля держит уникальное
-ограничение, а не `exists_in_community`.
+ограничение, а не `exists_in_city`.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class PlaceRepository:
         self._session = session
 
     @staticmethod
-    def build_exists_statement(community_slug: str, name: str) -> Select[Place]:
+    def build_exists_statement(city_slug: str, name: str) -> Select[Place]:
         """AC-04: проверка «место с таким названием есть в ЭТОМ сообществе».
 
         Оба условия обязательны: AC-04 явно разрешает места с одинаковым
@@ -49,17 +49,17 @@ class PlaceRepository:
 
         Вынесено отдельным статическим методом, чтобы текст условия
         проверялся без БД: гонку двух вставок в одной сессии доказать
-        нельзя (§18.3), а «убрать `community_slug` из `WHERE`» — реальный
+        нельзя (§18.3), а «убрать `city_slug` из `WHERE`» — реальный
         дефект, который тест обязан ловить.
         """
         return select(Place).where(
-            Place.community_slug == community_slug,
+            Place.city_slug == city_slug,
             Place.name == name,
         )
 
     @staticmethod
     def build_exists_excluding_statement(
-        community_slug: str, name: str, exclude_uuid: uuid_lib.UUID
+        city_slug: str, name: str, exclude_uuid: uuid_lib.UUID
     ) -> Select[Place]:
         """Task 3.3 (AC-05): «такое имя занято, но не мной».
 
@@ -73,7 +73,7 @@ class PlaceRepository:
         (он пришёл в пути), а внутренний bigint наружу не выдаётся (D-2).
         """
         return select(Place).where(
-            Place.community_slug == community_slug,
+            Place.city_slug == city_slug,
             Place.name == name,
             Place.uuid != exclude_uuid,
         )
@@ -96,7 +96,7 @@ class PlaceRepository:
 
     @staticmethod
     def _list_conditions(
-        *, community_slug: str, category: str | None, include_inactive: bool
+        *, city_slug: str, category: str | None, include_inactive: bool
     ) -> list[Any]:
         """AC-01, AC-02, AC-03: условия выдачи БЕЗ курсора — общий предикат.
 
@@ -117,7 +117,7 @@ class PlaceRepository:
         Категория накладывается поверх: фильтр сужает выдачу, но не отменяет
         ни срез сообщества, ни `is_active`.
         """
-        conditions: list[Any] = [Place.community_slug == community_slug]
+        conditions: list[Any] = [Place.city_slug == city_slug]
         # CR 3.3, патч 5: строгое `is not True` вместо инверсии. Скрытые
         # места видны только при ЯВНОМ `True`, который уже прошёл
         # `require_moderator` в зависимости.
@@ -130,7 +130,7 @@ class PlaceRepository:
     @staticmethod
     def build_list_statement(
         *,
-        community_slug: str,
+        city_slug: str,
         category: str | None,
         include_inactive: bool,
         after: tuple[datetime, uuid_lib.UUID] | None,
@@ -157,7 +157,7 @@ class PlaceRepository:
         """
         statement = select(Place).where(
             *PlaceRepository._list_conditions(
-                community_slug=community_slug,
+                city_slug=city_slug,
                 category=category,
                 include_inactive=include_inactive,
             )
@@ -171,7 +171,7 @@ class PlaceRepository:
 
     @staticmethod
     def build_count_statement(
-        *, community_slug: str, category: str | None, include_inactive: bool
+        *, city_slug: str, category: str | None, include_inactive: bool
     ) -> Select[int]:
         """AC-02, AC-04, D-4: `total` — «сколько всего под фильтром».
 
@@ -188,7 +188,7 @@ class PlaceRepository:
             .select_from(Place)
             .where(
                 *PlaceRepository._list_conditions(
-                    community_slug=community_slug,
+                    city_slug=city_slug,
                     category=category,
                     include_inactive=include_inactive,
                 )
@@ -198,7 +198,7 @@ class PlaceRepository:
     async def list_page(
         self,
         *,
-        community_slug: str,
+        city_slug: str,
         category: str | None,
         include_inactive: bool,
         after: tuple[datetime, uuid_lib.UUID] | None,
@@ -221,7 +221,7 @@ class PlaceRepository:
             raise ValueError("limit должен быть >= 1")
         bounded = min(limit, MAX_PLACES_PAGE_SIZE)
         page_statement = self.build_list_statement(
-            community_slug=community_slug,
+            city_slug=city_slug,
             category=category,
             include_inactive=include_inactive,
             after=after,
@@ -231,7 +231,7 @@ class PlaceRepository:
         items = list(page_result.scalars().all())
 
         count_statement = self.build_count_statement(
-            community_slug=community_slug,
+            city_slug=city_slug,
             category=category,
             include_inactive=include_inactive,
         )
@@ -257,14 +257,14 @@ class PlaceRepository:
         )
         return result.scalar_one_or_none()
 
-    async def find_by_community_and_name(self, community_slug: str, name: str) -> Place | None:
-        """Task 6.1: место по паре `(community_slug, name)`.
+    async def find_by_city_and_name(self, city_slug: str, name: str) -> Place | None:
+        """Task 6.1: место по паре `(city_slug, name)`.
 
         Адресация парой, а не только именем: одинаковые названия в разных
         сообществах — легальное состояние (AC-04).
 
         CR 3.1, патч 16: `limit(1)`, а не полный набор строк. Уникальность
-        пары держит `uq_places_community_name`, но строки с краевыми
+        пары держит `uq_places_city_name`, но строки с краевыми
         пробельными раньше проходили CHECK (см. патч 8), поэтому в старых
         данных дубль возможен — и `scalar_one_or_none()` на двух строках
         даёт `MultipleResultsFound`, то есть падение вместо `None`. `limit(1)`
@@ -278,29 +278,29 @@ class PlaceRepository:
         # `id` добавлен как тай-брейкер: `created_at` у двух строк в одной
         # транзакции совпадает до микросекунды (`now()` = время начала транзакции).
         statement = (
-            self.build_exists_statement(community_slug, name)
+            self.build_exists_statement(city_slug, name)
             .order_by(Place.created_at, Place.id)
             .limit(1)
         )
         result = await self._session.execute(statement)
         return result.scalar_one_or_none()
 
-    async def exists_in_community(self, community_slug: str, name: str) -> bool:
+    async def exists_in_city(self, city_slug: str, name: str) -> bool:
         """AC-04, D-4: дешёвый путь для понятной ошибки, НЕ гарантия уникальности.
 
         Проверка перед вставкой пропускает две параллельные вставки одного
         имени (§18.3): между `SELECT` и `INSERT` второй запрос успевает
         вставить свою строку. Корректность обеспечивает
-        `uq_places_community_name`; этот метод существует, чтобы в обычном
+        `uq_places_city_name`; этот метод существует, чтобы в обычном
         (неконкурентном) случае пользователь получил `PLACE_DUPLICATE`
         без исключения из драйвера.
         """
-        statement = self.build_exists_statement(community_slug, name)
+        statement = self.build_exists_statement(city_slug, name)
         result = await self._session.execute(statement.limit(1))
         return result.first() is not None
 
-    async def exists_in_community_excluding(
-        self, community_slug: str, name: str, exclude_uuid: uuid_lib.UUID
+    async def exists_in_city_excluding(
+        self, city_slug: str, name: str, exclude_uuid: uuid_lib.UUID
     ) -> Place | None:
         """Task 3.3–3.4 (AC-05, AC-03): занято ли имя ДРУГИМ местом.
 
@@ -310,16 +310,16 @@ class PlaceRepository:
         `details.existing_uuid`, D-6). Второй запрос за той же строкой дал бы
         окно гонки между двумя чтениями.
 
-        `limit(1)` по той же причине, что в `find_by_community_and_name`:
+        `limit(1)` по той же причине, что в `find_by_city_and_name`:
         `scalar_one_or_none()` на двух строках даёт `MultipleResultsFound`,
         то есть падение вместо ответа.
         """
-        # QD B1 (CR 3.2): тот же детерминизм, что в `find_by_community_and_name`.
+        # QD B1 (CR 3.2): тот же детерминизм, что в `find_by_city_and_name`.
         # Порядок обязан совпадать: `PLACE_ARCHIVED.existing_uuid` на `PATCH`
         # и на `POST` должен указывать на ОДНО и то же место, иначе админ
         # видит два разных адреса для одной и той же ситуации.
         statement = (
-            self.build_exists_excluding_statement(community_slug, name, exclude_uuid)
+            self.build_exists_excluding_statement(city_slug, name, exclude_uuid)
             .order_by(Place.created_at, Place.id)
             .limit(1)
         )
@@ -330,7 +330,7 @@ class PlaceRepository:
 
     @staticmethod
     def build_availability_statement(
-        *, place_uuid: uuid_lib.UUID, community_slug: str
+        *, place_uuid: uuid_lib.UUID, city_slug: str
     ) -> Select[Place]:
         """AC-04 (FR98, ADR-12): место, на которое можно сослаться в карточке.
 
@@ -340,7 +340,7 @@ class PlaceRepository:
         2. `is_active IS TRUE` — место не скрыто (FR68: «скрыть» ≠ «удалить»);
            скрытое место остаётся в старых карточках, но новую на него
            завести нельзя;
-        3. `community_slug = :slug` — место принадлежит сообществу карточки.
+        3. `city_slug = :slug` — место принадлежит сообществу карточки.
            Без этого карточка в Томске могла бы сослаться на кемеровское
            кафе, а лента её сообщества показала бы адрес, которого участники
            не знают.
@@ -356,11 +356,11 @@ class PlaceRepository:
         return select(Place).where(
             Place.uuid == place_uuid,
             Place.is_active.is_(True),
-            Place.community_slug == community_slug,
+            Place.city_slug == city_slug,
         )
 
     async def is_available_for_card(
-        self, *, place_uuid: uuid_lib.UUID, community_slug: str
+        self, *, place_uuid: uuid_lib.UUID, city_slug: str
     ) -> bool:
         """AC-04: `EXISTS`-проверка доступности места перед созданием карточки.
 
@@ -375,14 +375,14 @@ class PlaceRepository:
         поэтому `DBAPIError` на этой ветке невозможен.
         """
         statement = self.build_availability_statement(
-            place_uuid=place_uuid, community_slug=community_slug
+            place_uuid=place_uuid, city_slug=city_slug
         )
         result = await self._session.execute(select(statement.exists()))
         available: bool = result.scalar_one()
         return available
 
     async def find_available_for_card(
-        self, *, place_uuid: uuid_lib.UUID, community_slug: str
+        self, *, place_uuid: uuid_lib.UUID, city_slug: str
     ) -> Place | None:
         """Стори 4.2, AC-02: доступное место для карточки — сама строка, не факт.
 
@@ -400,7 +400,7 @@ class PlaceRepository:
         """
         result = await self._session.execute(
             self.build_availability_statement(
-                place_uuid=place_uuid, community_slug=community_slug
+                place_uuid=place_uuid, city_slug=city_slug
             ).execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
@@ -419,10 +419,10 @@ class PlaceRepository:
 
     @staticmethod
     def is_duplicate_name_error(error: Any) -> bool:
-        """AC-04, Task 6.4: отличает нарушение `uq_places_community_name` от прочих.
+        """AC-04, Task 6.4: отличает нарушение `uq_places_city_name` от прочих.
 
         Без этой проверки любой `IntegrityError` (нарушенный CHECK, чужой
         уникальный ключ) превращался бы в `PLACE_DUPLICATE`, и админ видел бы
         «такое место уже есть» на ошибке, к дублю не относящейся.
         """
-        return PlaceRepository.constraint_name_of(error) == "uq_places_community_name"
+        return PlaceRepository.constraint_name_of(error) == "uq_places_city_name"

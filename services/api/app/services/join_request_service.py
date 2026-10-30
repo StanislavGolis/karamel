@@ -40,6 +40,7 @@ from app.repositories.join_requests import JoinRequestRepository
 from app.repositories.profile_photos import ProfilePhotoRepository
 from app.repositories.users import UserRepository
 from app.schemas.ws import WsEnvelope
+from app.services.age_service import compute_age, today_or_now
 from app.services.card_requests_cursor import (
     decode_card_requests_cursor,
     encode_card_requests_cursor,
@@ -97,7 +98,7 @@ MAX_CARD_REQUESTS_PAGE_SIZE = 100
 class JoinRequestSettings(Protocol):
     """AC-04, AC-07: минимум настроек, который нужен сервису."""
 
-    default_community_slug: str
+    default_city_slug: str
     join_request_active_limit: int
     # AC-07: TTL подписи фото объявлен в Protocol, а не читается `getattr`:
     # опечатка в имени поля не покраснела бы ни в mypy, ни в тесте и молча
@@ -226,7 +227,7 @@ class JoinRequestNotFoundError(Exception):
 
     Предикат `applicant_id` стоит в самом SQL, а не в `if` после выборки:
     проверка после выборки забывается при первом рефакторинге (класс дефекта
-    `community_slug` в 3.3).
+    `city_slug` в 3.3).
     """
 
     code = REQUEST_NOT_FOUND_CODE
@@ -306,7 +307,7 @@ async def submit_join_request(
        сериализации доменного лимита. Все подачи участника встают в очередь
        здесь, поэтому `COUNT` на шаге 7 видит уже зафиксированный результат
        предыдущей;
-    2. карточка по `uuid` + `community_slug` (AC-07): чужое сообщество
+    2. карточка по `uuid` + `city_slug` (AC-07): чужое сообщество
        неотличимо от несуществующей;
     3. `404` — нет карточки (после блокировки, но до любых проверок прав);
     4. `403 JOIN_REQUEST_OWN_CARD` — своя карточка. Раньше проверки статуса:
@@ -338,7 +339,7 @@ async def submit_join_request(
 
     # 2. AC-07: чтение с срезом сообщества. FK/идентификаторы наружу не идут.
     card: EventCard | None = await repo.get_card_for_request(
-        card_uuid, settings.default_community_slug
+        card_uuid, settings.default_city_slug
     )
     # 3. AC-07: нет карточки == чужое сообщество (ADR-13, `404` с тем же телом).
     if card is None:
@@ -396,6 +397,12 @@ async def submit_join_request(
         # бы как нормальный конфликт состояния.
         logger.error("join_request.insert.failed", applicant_id=applicant_id)
         raise
+    # CR 12.6 H-1: новая заявка — «появился шанс на решение». Если карточка
+    # была помечена «рамки отсекли всех» (`audience_skipped_at`), метка
+    # снимается: новый заявитель может проходить рамки, и держать его вне
+    # очереди воркера до правки карточки значило бы терять выбор. В той же
+    # транзакции, что и заявка: либо обе записи, либо ни одной.
+    await EventCardRepository(session).clear_audience_skipped(card_id=card.id)
     await session.commit()
 
     # Стори 9.2 (AC-1, FR43, ADR-11): «заявка пришла» — ТОЛЬКО после commit.
@@ -475,13 +482,13 @@ async def cancel_join_request(
     repo = repository if repository is not None else JoinRequestRepository(session)
 
     # 1. AC-01, AC-04, AC-05: единственный `UPDATE` с предикатом `pending`.
-    if await repo.cancel_own_pending(request_uuid, applicant_id, settings.default_community_slug):
+    if await repo.cancel_own_pending(request_uuid, applicant_id, settings.default_city_slug):
         await session.commit()
         return
 
     # 2. AC-04, AC-05: разбор отказа. Предикаты те же (своя заявка + сообщество),
     # иначе `404` подменялся бы `409` на чужой заявке.
-    status = await repo.get_own_status(request_uuid, applicant_id, settings.default_community_slug)
+    status = await repo.get_own_status(request_uuid, applicant_id, settings.default_city_slug)
     if status is None:
         raise JoinRequestNotFoundError()
     if status == JoinRequestStatus.CANCELLED:
@@ -588,7 +595,7 @@ async def select_join_request(
     await UserRepository(session).lock_for_update(author_id)
 
     # 2. AC-04: карточка и `id` заявки одним запросом, срез сообщества в SQL.
-    found = await repo.get_card_for_select(request_uuid, settings.default_community_slug)
+    found = await repo.get_card_for_select(request_uuid, settings.default_city_slug)
     if found is None:
         # 3. AC-04: различаем «заявки нет» и «карточка чужая». Оба — `404`,
         # но разными кодами: клиент не должен путать опечатку в `uuid`
@@ -870,7 +877,7 @@ async def list_my_requests(
 
     rows = await repo.list_my_requests(
         applicant_id=applicant_id,
-        community_slug=settings.default_community_slug,
+        city_slug=settings.default_city_slug,
         after=after,
         limit=effective_limit + 1,
     )
@@ -878,7 +885,7 @@ async def list_my_requests(
     page_rows = rows[:effective_limit]
 
     total = await repo.count_my_requests(
-        applicant_id=applicant_id, community_slug=settings.default_community_slug
+        applicant_id=applicant_id, city_slug=settings.default_city_slug
     )
 
     author_ids = [int(row.author_id) for row in page_rows]
@@ -907,7 +914,8 @@ async def list_my_requests(
             place_address_text=row.place_address_text,
             author_uuid=row.author_uuid,
             author_name=row.author_name,
-            author_age=row.author_age,
+            # Стори 12.2, AC-3: наружу — вычисленный возраст, не колонка.
+            author_age=compute_age(row.author_birth_date, row.author_age, today_or_now()),
             author_photo_url=signed.get(int(row.author_id)),
         )
         for row in page_rows
@@ -947,6 +955,11 @@ class CardRequestsEntry:
     applicant_name: str | None
     applicant_age: int | None
     photo_url: str | None
+    # AC-3 стори 12.6 (FR119): проходит ли заявитель рамки карточки.
+    # `None` — у карточки рамок нет, проверять нечего (не «истина»:
+    # иначе «вне рамок» и «рамок нет» выглядели бы одинаково). Рамок нет
+    # ⇒ `within_bounds` в ответе тоже `None`.
+    within_bounds: bool | None
 
 
 @dataclass(frozen=True)
@@ -1023,7 +1036,7 @@ async def list_card_requests(
 
     Порядок шагов — контракт, каждый следующий опирается на предыдущий:
 
-    1. карточка по `uuid` + `community_slug`: чужое сообщество неотличимо от
+    1. карточка по `uuid` + `city_slug`: чужое сообщество неотличимо от
        несуществующей (AC-02, ADR-13);
     2. проверка авторства ДО любых выборок заявок (D-5a.4-3): не автор →
        тот же `404 card_not_found`, что и «нет карточки». `403` подтвердил бы
@@ -1043,7 +1056,7 @@ async def list_card_requests(
     """
     repo = repository if repository is not None else JoinRequestRepository(session)
 
-    card = await repo.get_card_for_request(card_uuid, settings.default_community_slug)
+    card = await repo.get_card_for_request(card_uuid, settings.default_city_slug)
     if card is None:
         # AC-02 (ADR-13): нет карточки ИЛИ чужое сообщество — один ответ.
         raise JoinRequestCardNotFoundError()
@@ -1061,12 +1074,31 @@ async def list_card_requests(
     after = decode_card_requests_cursor(cursor) if cursor is not None else None
     effective_limit = max(1, min(limit, MAX_CARD_REQUESTS_PAGE_SIZE))
 
+    # AC-3 + AC-5a стори 12.6: предикат рамок строится ЗДЕСЬ и ОДИН раз.
+    # Тот же объект-выражение уходит в автовыбор (`close_due_card`), поэтому
+    # «вне рамок» в списке автора и «не выбран» в автовыборе — один и тот же
+    # ответ на один и тот же вопрос. Два вызова дали бы два SQL-дерева, и
+    # правка одной копии не попала бы в другую (ловушка 1 Dev Notes).
+    #
+    # `None`, когда рамок нет: подзапрос возраста не нужен вовсе, и в ответе
+    # `within_bounds` будет `None` — «проверять нечего», а не «проходит».
+    within_bounds = (
+        JoinRequestRepository.build_within_bounds_predicate(
+            gender_filter=card.gender_filter,
+            age_min=card.age_min,
+            age_max=card.age_max,
+        )
+        if card.has_audience_bounds
+        else None
+    )
+
     rows = await repo.list_card_requests(
         card_id=card.id,
-        community_slug=settings.default_community_slug,
+        city_slug=settings.default_city_slug,
         statuses=statuses,
         after=after,
         limit=effective_limit + 1,
+        within_bounds=within_bounds,
     )
     has_more = len(rows) > effective_limit
     page_rows = rows[:effective_limit]
@@ -1087,8 +1119,15 @@ async def list_card_requests(
             applicant_user_id=int(row.applicant_user_id),
             applicant_uuid=row.applicant_uuid,
             applicant_name=row.applicant_name,
-            applicant_age=row.applicant_age,
+            # Стори 12.2, AC-3: возраст вычисляется из `birth_date`.
+            applicant_age=compute_age(
+                row.applicant_birth_date, row.applicant_age, today_or_now()
+            ),
             photo_url=signed.get(int(row.applicant_user_id)),
+            # AC-3 стори 12.6 (FR119): значение пришло из SQL-проекции —
+            # того же предиката, что фильтрует автовыбор (AC-5a). `None` —
+            # у карточки рамок нет (проекция подставила литерал `NULL`).
+            within_bounds=row.within_bounds,
         )
         for row in page_rows
     ]

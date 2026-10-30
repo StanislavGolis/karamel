@@ -92,7 +92,7 @@ async def _create_user(session: AsyncSession, *, phone: str | None = None) -> in
     phone = phone or _next_phone()
     result = await session.execute(
         text(
-            "INSERT INTO users (provider, phone, community_slug) "
+            "INSERT INTO users (provider, phone, city_slug) "
             "VALUES ('phone', :phone, 'tomsk') RETURNING id"
         ),
         {"phone": phone},
@@ -104,7 +104,7 @@ async def _create_place(session: AsyncSession) -> int:
     """Создаёт место: карточке нужен FK `place_id`."""
     result = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES ('Кафе „Прага“', 'cafe', 'пр. Ленина, 1', 'tomsk', true) RETURNING id"
         )
     )
@@ -122,10 +122,11 @@ async def _create_card(
     place_id = await _create_place(session)
     result = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, category, "
-            "starts_at, capacity, decision_window_minutes, expires_at, status, published_at) "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, category, "
+            "starts_at, capacity, decision_window_minutes, expires_at, status, published_at,"
+            "kind, activity) "
             "VALUES (:author_id, :place_id, 'tomsk', 'Кофе', 'cafe', :starts_at, :capacity, "
-            "2880, :expires_at, :status, :published_at) RETURNING id"
+            "2880, :expires_at, :status, :published_at, 'company', 'other') RETURNING id"
         ),
         {
             "author_id": author_id,

@@ -33,7 +33,10 @@ const ERRORS: Record<string, string> = {
   name_too_long: "Имя длиннее 50 символов. Сократите, пожалуйста.",
   city_too_long: "Название города длиннее 100 символов. Проверьте написание.",
   bio_too_long: "Текст длиннее 500 символов. Сократите, пожалуйста.",
-  invalid_age: "Возраст должен быть от 18 до 99 лет.",
+  // Стори 12.2, AC-4: два разных отказа вместо одного `invalid_age`.
+  // «Вам нет 18» и «проверьте дату» — разные причины и разные действия.
+  underage: "Регистрация доступна с 18 лет.",
+  invalid_birth_date: "Проверьте дату рождения.",
   invalid_request: "Не удалось прочитать данные формы. Проверьте поля и попробуйте снова.",
   // Фикс OOM (2026-10-22): отказ гарда размера тела. Для анкеты недостижим
   // (легальное тело — единицы КБ), но код существует и должен читаться
@@ -64,17 +67,35 @@ const CONSENT_CODES = new Set(["consent_required"]);
 const DEFAULT_ERROR = "Не удалось сохранить анкету. Попробуйте ещё раз.";
 
 /** Пределы совпадают со схемой API (Task 2.3), чтобы клиент не отправлял заведомый отказ. */
-const LIMITS = { name: 50, city: 100, bio: 500, ageMin: 18, ageMax: 99 } as const;
+const LIMITS = { name: 50, city: 100, bio: 500 } as const;
+
+/**
+ * Нижняя граница даты рождения (стори 12.2, AC-4).
+ *
+ * Считается на клиенте только для `min` у `type="date"` — подсказка,
+ * а не проверка: источник истины сервер, и подмена системных часов
+ * на клиенте не должна ничего решать (ADR-17, «Отвергнуто» в).
+ */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 /** Ответ `GET /profiles/me` в объёме, нужном форме (без `id`/`user_id` — их нет в API). */
 export type ProfileValues = {
   name: string;
   city: string;
-  age: string;
+  /**
+   * Стори 12.2, AC-2: `type="date"` → `yyyy-mm-dd`.
+   *
+   * Наружу `birth_date` не отдаётся (AC-3, ADR-18), поэтому при правке
+   * поле приходит пустым — это норма, а не «дата потеряна». `age`
+   * показывается отдельно, только для чтения: он вычислен сервером.
+   */
+  birthDate: string;
   bio: string;
 };
 
-const EMPTY: ProfileValues = { name: "", city: "", age: "", bio: "" };
+const EMPTY: ProfileValues = { name: "", city: "", birthDate: "", bio: "" };
 
 /**
  * Совместимость: `initial` может быть `null` (анкеты нет), частичным
@@ -86,7 +107,10 @@ function toValues(initial: Partial<ProfileValues> | null): ProfileValues {
   return {
     name: initial.name ?? "",
     city: initial.city ?? "",
-    age: initial.age ?? "",
+    // AC-3: `birth_date` сервер не отдаёт никогда, поэтому при правке
+    // поле пустое. Подставлять сюда `age` значило бы выдать расчёт
+    // за введённые данные и сохранить неверную дату при отправке.
+    birthDate: "",
     bio: initial.bio ?? "",
   };
 }
@@ -97,6 +121,11 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
   const router = useRouter();
   const [values, setValues] = useState<ProfileValues>(() => toValues(initial));
   const [error, setError] = useState<string | null>(null);
+  // AC-3 стори 11.9 (решение владельца П-4б): тон зависит от ИСТОЧНИКА.
+  // Отказ сервера — `danger` (действие не выполнено). Незавершённый ввод,
+  // который человек исправляет сам, — `warning`: красное на своей опечатке
+  // пугает и не сообщает, что поле просто не заполнено.
+  const [errorTone, setErrorTone] = useState<"warning" | "danger">("danger");
   const [invalidField, setInvalidField] = useState<FieldName | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [isPending, setPending] = useState(false);
@@ -112,7 +141,12 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
     values.name.trim().length > 0 &&
     values.city.trim().length > 0 &&
     values.bio.trim().length > 0 &&
-    values.age.trim().length > 0 &&
+    // Стори 12.2, AC-2 + AC-3: при СОЗДАНИИ дата обязательна.
+    // При ПРАВКЕ она не приходит (наружу не отдаётся), поэтому пустое
+    // поле означает «не менять», а не «не заполнено»: требовать ввод
+    // каждый раз значило бы заставлять человека вводить дату заново
+    // при правке одного имени.
+    (isEdit || values.birthDate.trim().length > 0) &&
     !isPending;
 
   function update(field: FieldName, value: string): void {
@@ -149,9 +183,14 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
     if (code === "city_required" || code === "city_too_long") setInvalidField("city");
     else if (code === "name_too_long") setInvalidField("name");
     else if (code === "bio_too_long") setInvalidField("bio");
-    else if (code === "invalid_age") setInvalidField("age");
+    // Стори 12.2, AC-4: два кода — одно поле «дата рождения».
+    else if (code === "underage" || code === "invalid_birth_date") {
+      setInvalidField("birthDate");
+    }
     else setInvalidField(null);
 
+    // AC-4: отказ API — `danger` независимо от того, назван ли код.
+    setErrorTone("danger");
     setError((code && ERRORS[code]) || DEFAULT_ERROR);
   }
 
@@ -161,25 +200,30 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
     setStatus(null);
     setPending(true);
     try {
-      // CR 2.3, Решение 2: возраст проверяется до отправки. Раньше пустое поле
-      // уходило как `Number("")` → `0`, сервер отвечал `422 invalid_age`
-      // (или `invalid_request`), и пользователь не понимал, что не так.
-      // Теперь пустой и нечисловой возраст — отказ на клиенте с подсветкой поля.
-      const parsedAge = Number(values.age);
-      if (values.age.trim().length === 0 || !Number.isFinite(parsedAge)) {
-        setInvalidField("age");
-        setError("Укажите возраст числом.");
+      // Стори 12.2, AC-2: дата рождения уходит строкой `yyyy-mm-dd` —
+      // именно этот формат принимает `type="date"` и Pydantic (`date`).
+      // Число лет больше не парсится: возраст вычисляет сервер (ADR-17).
+      // При правке пустое поле означает «не менять» (AC-3: дата не отдаётся).
+      if (!isEdit && values.birthDate.trim().length === 0) {
+        setInvalidField("birthDate");
+        setErrorTone("warning");
+        setError("Укажите дату рождения.");
         return;
       }
 
       // AC-02, AC-03: тело — только поля анкеты. `gender`/`status` API
       // отклоняет (`extra="forbid"`), поэтому они не отправляются вовсе.
-      const body: Record<string, string | number> = {
+      const body: Record<string, string> = {
         name: values.name.trim(),
         city: values.city.trim(),
-        age: parsedAge,
         bio: values.bio.trim(),
       };
+      // AC-2: поле отправляется только если заполнено. Пустое при правке
+      // означает «оставить как есть»; сервер вернул бы `422 field_required`
+      // на явный `null`, поэтому ключ просто не включается (D-11).
+      if (values.birthDate.trim().length > 0) {
+        body.birth_date = values.birthDate.trim();
+      }
 
       const response = await fetch(
         isEdit ? "/api/proxy/profiles/me" : "/api/proxy/profiles",
@@ -202,6 +246,8 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
       // и переключит форму в режим правки без перезагрузки страницы.
       router.refresh();
     } catch {
+      // AC-4: сбой сети — не ошибка ввода, тон остаётся `danger`.
+      setErrorTone("danger");
       setError(DEFAULT_ERROR);
     } finally {
       setPending(false);
@@ -314,16 +360,23 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
         </button>
       </div>
 
+      {/* Стори 12.2, AC-2: дата рождения вместо числа лет.
+          `type="date"` даёт календарь и формат `yyyy-mm-dd` без парсинга.
+          Возраст больше не вводится — он вычисляется сервером (ADR-17),
+          поэтому устареть в день рождения не может. */}
       <Field
-        id="age"
-        label="Возраст"
-        value={values.age}
-        type="number"
-        min={LIMITS.ageMin}
-        max={LIMITS.ageMax}
-        invalid={invalidField === "age"}
-        hint={`От ${LIMITS.ageMin} до ${LIMITS.ageMax} лет.`}
-        onChange={(value) => update("age", value)}
+        id="birthDate"
+        label="Дата рождения"
+        value={values.birthDate}
+        type="date"
+        max={todayIso()}
+        invalid={invalidField === "birthDate"}
+        hint={
+          isEdit
+            ? "Оставьте пустым, чтобы не менять. Возраст считается из даты."
+            : "Возраст считается из даты и не устаревает. С 18 лет."
+        }
+        onChange={(value) => update("birthDate", value)}
       />
 
       <div className="flex flex-col gap-2">
@@ -347,7 +400,14 @@ export function ProfileForm({ initial }: { initial: Partial<ProfileValues> | nul
       </div>
 
       {error !== null && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-sm text-danger">
+        <p
+          role="alert"
+          className={
+            errorTone === "warning"
+              ? "rounded-md bg-warning-tint px-4 py-3 text-sm text-warning"
+              : "rounded-md bg-danger-tint px-4 py-3 text-sm text-danger"
+          }
+        >
           {error}
         </p>
       )}
@@ -399,10 +459,12 @@ function Field({
   hint: string;
   invalid?: boolean;
   required?: boolean;
-  type?: "text" | "number";
+  type?: "text" | "number" | "date";
   maxLength?: number;
-  min?: number;
-  max?: number;
+  // `type="date"` принимает границы строкой `yyyy-mm-dd`, числовые поля —
+  // числом (стори 12.2: дата рождения пришла на смену числу лет).
+  min?: number | string;
+  max?: number | string;
 }) {
   return (
     <div className="flex flex-col gap-2">

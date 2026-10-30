@@ -22,6 +22,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import get_session
 from app.main import app
 from app.models.user import User
@@ -219,7 +220,13 @@ async def test_female_consent_succeeds_and_is_idempotent(
     assert stored.consent_given_at is not None
     assert stored.age_confirmed is True
     assert stored.gender == "female"
+    # Стори 11.4 (AC-3, NFR36): версия правил записана и равна настройке.
+    # CR 11.4, P6: сверка с ТЕМ ЖЕ объектом, что читает сервис. Module-level
+    # `settings` создан при импорте; после `cache_clear()` он расходится с
+    # `get_settings()`, и ассерт доказывал бы не то, что записано.
+    assert stored.consent_version == get_settings().moderation_rules_version
     first_time = stored.consent_given_at
+    first_version = stored.consent_version
 
     second = await client.post(
         "/api/v1/auth/consent",
@@ -234,6 +241,65 @@ async def test_female_consent_succeeds_and_is_idempotent(
     # Патч 6: повтор не сдвигает метку — сравнение с исходным значением из БД.
     stored_again = await _reload(session, user_uuid)
     assert stored_again.consent_given_at == first_time
+    # Стори 11.4 (AC-3.3): версия при повторе без бампа настроек не меняется.
+    assert stored_again.consent_version == first_version
+
+
+async def test_consent_records_version_from_settings_not_literal(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Стори 11.4, AC-3.3: повторное согласие обновляет версию, время — нет.
+
+    Проверяется ДВА утверждения одним сценарием, потому что они различаются
+    только между собой:
+
+    1. версия берётся из НАСТРОЙКИ, а не литералом — после `MODERATION_RULES_VERSION=9.9`
+       в БД обязано оказаться `9.9`. Краснеет от мутации M3 (замена
+       `settings.moderation_rules_version` на строку `"1.0"`);
+    2. время согласия при повторе НЕ перезаписывается (D-4), а версия —
+       перезаписывается: именно это различие делает её пригодной для вопроса
+       «кто переподтвердил редакцию».
+
+    `get_settings.cache_clear()` обязателен: `get_settings` кэширован через
+    `lru_cache`, и `monkeypatch.setenv` без сброса кэша не изменил бы ничего —
+    тест был бы зелёным при литерале в сервисе (P-11).
+    """
+    user_uuid, token = await _new_user(session)
+
+    first = await client.post(
+        "/api/v1/auth/consent",
+        json={"age_confirmed": True, "consent": True, "gender": "female"},
+        cookies={ACCESS_COOKIE_NAME: token},
+    )
+    assert first.status_code == 200
+
+    stored = await _reload(session, user_uuid)
+    first_time = stored.consent_given_at
+    first_version = stored.consent_version
+    assert first_version == get_settings().moderation_rules_version
+
+    # Новая редакция правил: значение приходит из окружения, кэш сброшен.
+    monkeypatch.setenv("MODERATION_RULES_VERSION", "9.9")
+    get_settings.cache_clear()
+    try:
+        second = await client.post(
+            "/api/v1/auth/consent",
+            json={"age_confirmed": True, "consent": True, "gender": "female"},
+            cookies={ACCESS_COOKIE_NAME: token},
+        )
+        assert second.status_code == 200
+        assert second.json()["is_new"] is False
+
+        stored_again = await _reload(session, user_uuid)
+        # AC-3.3: версия сменилась на значение из настроек, а не осталась 1.0.
+        assert stored_again.consent_version == "9.9"
+        assert stored_again.consent_version != first_version
+        # D-4: время согласия не сдвинулось — это разные факты.
+        assert stored_again.consent_given_at == first_time
+    finally:
+        # P-11: кэш настроек — глобальное состояние процесса. Без сброса
+        # следующий тест увидел бы `9.9` и падал бы «не по делу».
+        get_settings.cache_clear()
 
 
 async def test_male_consent_leaves_status_active_and_no_application(

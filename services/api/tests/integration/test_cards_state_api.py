@@ -35,8 +35,8 @@ pytestmark = [
 ]
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 def _future(**delta: int) -> datetime:
@@ -73,10 +73,10 @@ async def _place(session: AsyncSession) -> int:
     """Место сообщества и его внутренний `id` (нужен для FK карточки)."""
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _city()},
     )
     return int(row.scalar_one())
 
@@ -100,16 +100,17 @@ async def _insert_card(
     expires = expires_at or (starts - timedelta(hours=1))
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, :title, :description, 'cafe', :starts, :capacity, "
-            "60, :expires, :status, :filled, :verification, :published_at) RETURNING uuid"
+            "60, :expires, :status, :filled, :verification, :published_at,"
+            "'company', 'coffee') RETURNING uuid"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": _community(),
+            "slug": _city(),
             "title": title,
             "description": description,
             "starts": starts,

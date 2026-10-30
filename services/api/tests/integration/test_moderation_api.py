@@ -35,8 +35,8 @@ pytestmark = [
 ]
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 def _starts_at(**delta: int) -> datetime:
@@ -47,6 +47,9 @@ def _payload(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "title": "Настольные игры",
         "category": "cafe",
+        # Стори 12.4 (AC-3, FR117/FR118): оба поля обязательны в `EventCardCreate`.
+        "kind": "company",
+        "activity": "boardgames",
         "starts_at": _starts_at(days=3).isoformat(),
         "capacity": 3,
     }
@@ -84,10 +87,10 @@ async def _new_user(session: AsyncSession, *, role: str = UserRole.USER) -> tupl
 async def _insert_place(session: AsyncSession) -> str:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'пр. Ленина, 1', :slug, true) RETURNING uuid"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _city()},
     )
     return str(row.scalar_one())
 
@@ -665,14 +668,14 @@ async def test_queue_no_store_header(client: AsyncClient, session: AsyncSession)
 async def _insert_foreign_card(session: AsyncSession, *, author_id: int) -> str:
     """Карточка ЧУЖОГО сообщества напрямую в БД.
 
-    Через API её не создать: `community_slug` всегда берётся из настроек
+    Через API её не создать: `city_slug` всегда берётся из настроек
     (ADR-01). Сырой INSERT — единственный способ воспроизвести сценарий
     «модератор другого города открыл очередь».
     """
     place_id = (
         await session.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:name, 'cafe', 'ул. Чужая, 1', 'other-city', true) RETURNING id"
             ),
             {"name": f"Чужое {uuid_lib.uuid4().hex[:8]}"},
@@ -681,22 +684,22 @@ async def _insert_foreign_card(session: AsyncSession, *, author_id: int) -> str:
     card_uuid = uuid_lib.uuid4()
     await session.execute(
         text(
-            "INSERT INTO event_cards (uuid, author_id, place_id, community_slug, title, "
+            "INSERT INTO event_cards (uuid, author_id, place_id, city_slug, title, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "verification_status, filled_count) "
+            "verification_status, filled_count, kind, activity) "
             "VALUES (:uuid, :author, :place, 'other-city', 'Чужая карточка', 'cafe', "
             "now() + interval '3 days', 2, 2880, now() + interval '1 day', 'draft', "
-            "'pending', 0)"
+            "'pending', 0, 'company', 'coffee')"
         ),
         {"uuid": card_uuid, "author": author_id, "place": place_id},
     )
     return str(card_uuid)
 
 
-async def test_queue_hides_other_community(client: AsyncClient, session: AsyncSession) -> None:
+async def test_queue_hides_other_city(client: AsyncClient, session: AsyncSession) -> None:
     """AC-03, ADR-01/ADR-13 (CR 4.3, патч 1): очередь — только своё сообщество.
 
-    Краснеет, если убрать `WHERE community_slug = ...` из `build_queue_statement`
+    Краснеет, если убрать `WHERE city_slug = ...` из `build_queue_statement`
     и `build_queue_count_statement`: модератор «Томска» видел (и мог отклонить)
     карточку другого города, а `total` считал всю таблицу.
     """
@@ -717,7 +720,7 @@ async def test_queue_hides_other_community(client: AsyncClient, session: AsyncSe
 
 
 @pytest.mark.parametrize("action", ["approve", "reject"])
-async def test_decision_on_other_community_is_not_found(
+async def test_decision_on_other_city_is_not_found(
     client: AsyncClient, session: AsyncSession, action: str
 ) -> None:
     """AC-04/AC-05, ADR-13 (CR 4.3, патч 2): решение по чужой карточке — `404`.

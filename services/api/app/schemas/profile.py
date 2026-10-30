@@ -18,13 +18,14 @@ CR 2.1, Решение 3: схем две, как две аудитории. `Pr
 from __future__ import annotations
 
 import uuid as uuid_lib
-from datetime import datetime
-from typing import Literal
+from datetime import date, datetime
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from app.core.datetime_format import iso_utc
 from app.models.enums import Gender
+from app.services.age_service import compute_age, today_or_now
 
 
 class ProfilePublic(BaseModel):
@@ -57,6 +58,36 @@ class ProfilePublic(BaseModel):
         что `/auth/me` и `/auth/consent` расходились по формату.
         """
         return iso_utc(value)
+
+    @classmethod
+    def from_profile(cls, profile: object, *, today: date | None = None) -> Self:
+        """Собирает ответ из ORM-объекта, **вычисляя** `age` (AC-2, AC-3).
+
+        `from_attributes` здесь не работает: в модели `age` — legacy-колонка,
+        у новых учёток она `NULL`, а наружу должен уходить вычисленный возраст.
+        Взять `profile.age` напрямую значило бы отдавать `null` всем, кто
+        заполнил дату рождения, — то есть сломать контракт `age` для всех
+        потребителей (лента, карточка, участники, модерация).
+
+        `birth_date` в схему не попадает вообще: поля нет в `ProfilePublic`,
+        и `model_validate` его не читает (ADR-18, NFR66). Гард на отсутствие
+        ключа в JSON — стори 12.3.
+        """
+        values = {
+            "uuid": profile.uuid,
+            "name": profile.name,
+            # AC-2, AC-5: `birth_date` приоритетнее legacy-`age`.
+            "age": compute_age(profile.birth_date, profile.age, today or today_or_now()),
+            "city": profile.city,
+            "bio": profile.bio,
+            "gender": profile.gender,
+            "created_at": profile.created_at,
+            "updated_at": profile.updated_at,
+        }
+        if cls is ProfileOwn:
+            values["is_hidden"] = profile.is_hidden
+            values["status"] = profile.status
+        return cls(**values)
 
 
 class ProfileOwn(ProfilePublic):
@@ -113,7 +144,10 @@ class ProfileCreate(BaseModel):
     # и клиент получал бы `invalid_request` вместо `city_too_long`.
     name: str = Field(description="Имя, до 50 символов")
     city: str = Field(description="Город, до 100 символов")
-    age: int = Field(description="Возраст 18..99")
+    # Стори 12.2, AC-2: дата рождения вместо числа лет. Возраст больше не
+    # принимается от клиента — он вычисляется сервером (`age_service`),
+    # иначе человек мог бы прислать любое число и обойти 18+.
+    birth_date: date = Field(description="Дата рождения (18..99 полных лет)")
     bio: str = Field(description="Текст о себе, до 500 символов")
 
 
@@ -135,7 +169,12 @@ class ProfileUpdate(BaseModel):
     # (`city_too_long`, `invalid_age`) общим `invalid_request`.
     name: str | None = Field(default=None)
     city: str | None = Field(default=None)
-    age: int | None = Field(default=None)
+    # Стори 12.2, AC-2: правка тоже принимает дату, а не число.
+    # `age` здесь нет осознанно: два источника правды разойдутся на первом
+    # дне рождения (ADR-17, «Отвергнуто» а). Старый клиент с `age` получит
+    # `422 invalid_request` от `extra="forbid"` — волна 1 ломающая,
+    # веб и API деплоятся одновременно.
+    birth_date: date | None = Field(default=None)
     bio: str | None = Field(default=None)
 
 

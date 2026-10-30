@@ -31,17 +31,21 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import command
+from tests.conftest import HEAD_REVISION
 
 pytestmark = [
     pytest.mark.integration,
+    # Стори 12.9 (AC-4, W-11.4-d): DDL на общей схеме — несовместим с xdist.
+    pytest.mark.ddl,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
+
 
 API_ROOT = Path(__file__).resolve().parents[2]
 
 _INSERT_USER = (
     "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
-    "community_slug) "
+    "city_slug) "
     "VALUES ('phone', :p, :p, 'user', 'female', 'active', 'tomsk') RETURNING id"
 )
 
@@ -114,7 +118,7 @@ def test_0033_is_the_single_head() -> None:
     `upgrade head` недетерминированным, а `down_revision` из эпика (`0013`) — неверным (D-9.1-5)."""
     heads = tuple(ScriptDirectory.from_config(_config()).get_heads())
     # Стори 10.2: вершина стала `0033` (частичный индекс `users.deletion_requested_at`).
-    assert heads == ("0033",)
+    assert heads == (HEAD_REVISION,)
 
 
 def test_downgrade_leaves_no_residue_of_support_tickets() -> None:

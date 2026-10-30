@@ -53,8 +53,8 @@ async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
     app.dependency_overrides.pop(get_session, None)
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 async def _new_user(session: AsyncSession) -> tuple[User, str]:
@@ -77,10 +77,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _city()},
     )
     return int(row.scalar_one())
 
@@ -93,21 +93,22 @@ async def _insert_card(
     capacity: int = 4,
     filled_count: int = 0,
     status: str = "published",
-    community_slug: str | None = None,
+    city_slug: str | None = None,
 ) -> tuple[str, int]:
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, 60, "
-            ":expires, :status, :filled, 'approved', :published_at) RETURNING uuid, id"
+            ":expires, :status, :filled, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": community_slug or _community(),
+            "slug": city_slug or _city(),
             "starts": starts,
             "capacity": capacity,
             "expires": starts - timedelta(hours=1),
@@ -368,12 +369,12 @@ async def test_pending_request_is_not_cancelled_by_join_route(
 # --- AC-08: чужое сообщество ----------------------------------------------
 
 
-async def test_leave_in_other_community_returns_card_not_found(
+async def test_leave_in_other_city_returns_card_not_found(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-08 (ADR-13): чужое сообщество неотличимо от несуществующей карточки.
 
-    Краснеет, если искать карточку без среза `community_slug` (`if` после
+    Краснеет, если искать карточку без среза `city_slug` (`if` после
     выборки забывается при первом рефакторинге — класс дефекта 3.3).
     """
     author, _ = await _new_user(session)
@@ -385,7 +386,7 @@ async def test_leave_in_other_community_returns_card_not_found(
         place_id=place_id,
         capacity=4,
         filled_count=1,
-        community_slug="other-community",
+        city_slug="other-city",
     )
     await _insert_participation(session, card_id=card_id, applicant_id=member.id)
 
@@ -396,7 +397,7 @@ async def test_leave_in_other_community_returns_card_not_found(
     assert await _card_state(session, card_id) == (1, "published")
 
 
-async def test_leave_missing_card_returns_same_body_as_other_community(
+async def test_leave_missing_card_returns_same_body_as_other_city(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-08 (ADR-13): несуществующая карточка — то же тело, что у чужой.

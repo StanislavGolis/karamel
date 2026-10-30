@@ -55,7 +55,7 @@ export function PersonMini({ name, age, photoUrl }: PersonMiniProps) {
         // eslint-disable-next-line @next/next/no-img-element -- подписанный URL протухает; см. docstring.
         <img
           src={photoUrl}
-          alt=""
+          alt={name?.trim() ? name.trim() : "Фото пользователя"}
           width={48}
           height={48}
           loading="lazy"

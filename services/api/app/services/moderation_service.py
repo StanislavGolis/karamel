@@ -37,6 +37,7 @@ from app.schemas.moderation import (
     MODERATION_PAGE_SIZE,
     REJECTION_REASON_MAX_LENGTH,
 )
+from app.services.age_service import compute_age, today_or_now
 from app.services.card_content_rules import CardContent, evaluate_card_content
 from app.services.moderation_cursor import (
     InvalidCursorError,
@@ -61,12 +62,12 @@ INVALID_CURSOR_CODE = "invalid_cursor"
 class ModerationSettings(Protocol):
     """Минимум настроек для очереди (не весь `Settings`).
 
-    `default_community_slug` — срез сообщества (CR 4.3, патч 1, ADR-01):
+    `default_city_slug` — срез сообщества (CR 4.3, патч 1, ADR-01):
     без него очередь отдавала карточки чужих городов.
     """
 
     card_content_stop_words: tuple[str, ...]
-    default_community_slug: str
+    default_city_slug: str
 
 
 class ModerationCardNotFoundError(Exception):
@@ -186,7 +187,7 @@ async def list_moderation_queue(
     """
     repo = repository if repository is not None else EventCardRepository(session)
     # CR 4.3, патч 1 (ADR-01): срез сообщества. Слаг из настроек, не из запроса.
-    community_slug = settings.default_community_slug
+    city_slug = settings.default_city_slug
 
     after: tuple[datetime, uuid_lib.UUID] | None = None
     if cursor is not None:
@@ -201,7 +202,7 @@ async def list_moderation_queue(
     effective_limit = min(limit, MAX_MODERATION_PAGE_SIZE)
     rows, total = await repo.list_queue_page(
         status_filter=status,
-        community_slug=community_slug,
+        city_slug=city_slug,
         after=after,
         limit=effective_limit + 1,
     )
@@ -218,7 +219,15 @@ async def list_moderation_queue(
 
     entries: list[ModerationQueueEntry] = []
     for row in rows:
-        card, author_uuid, author_name, author_age, place_uuid, place_name = row
+        (
+            card,
+            author_uuid,
+            author_name,
+            author_age,
+            author_birth_date,
+            place_uuid,
+            place_name,
+        ) = row
         check = evaluate_card_content(
             CardContent(
                 title=card.title,
@@ -232,7 +241,8 @@ async def list_moderation_queue(
                 card=card,
                 author_uuid=author_uuid,
                 author_name=author_name,
-                author_age=author_age,
+                # Стори 12.2, AC-3: возраст вычисляется из `birth_date`.
+                author_age=compute_age(author_birth_date, author_age, today_or_now()),
                 place_uuid=place_uuid,
                 place_name=place_name,
                 failed_rules=check.failed_rules,
@@ -265,7 +275,7 @@ async def approve_card(
     repo = repository if repository is not None else EventCardRepository(session)
 
     # CR 4.3, патч 2 (ADR-13): решение только в своём сообществе.
-    card = await repo.get_for_moderation(card_uuid, community_slug=settings.default_community_slug)
+    card = await repo.get_for_moderation(card_uuid, city_slug=settings.default_city_slug)
     if card is None:
         raise ModerationCardNotFoundError()
     if card.status != EventCardStatus.DRAFT:
@@ -312,7 +322,7 @@ async def reject_card(
     repo = repository if repository is not None else EventCardRepository(session)
 
     # CR 4.3, патч 2 (ADR-13): решение только в своём сообществе.
-    card = await repo.get_for_moderation(card_uuid, community_slug=settings.default_community_slug)
+    card = await repo.get_for_moderation(card_uuid, city_slug=settings.default_city_slug)
     if card is None:
         raise ModerationCardNotFoundError()
     if card.status != EventCardStatus.DRAFT:

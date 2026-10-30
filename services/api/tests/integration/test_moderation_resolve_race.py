@@ -152,10 +152,10 @@ async def _open_message_report(
         member = await _user(session)
         place = await session.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
             ),
-            {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+            {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
         )
         place_id = int(place.scalar_one())
         _CREATED_PLACES.append(place_id)
@@ -163,15 +163,17 @@ async def _open_message_report(
         chat_uuid = str(uuid_lib.uuid4())
         card = await session.execute(
             text(
-                "INSERT INTO event_cards (author_id, place_id, community_slug, title, category, "
+                "INSERT INTO event_cards (author_id, place_id, city_slug, title, category, "
                 "starts_at, capacity, decision_window_minutes, expires_at, status, filled_count, "
-                "verification_status, published_at, chat_uuid) VALUES (:a, :p, :s, 'Встреча', "
-                "'cafe', :st, 2, 60, :e, 'full', 2, 'approved', :pub, :chat) RETURNING id"
+                "verification_status, published_at, chat_uuid,"
+                "kind, activity) VALUES (:a, :p, :s, 'Встреча', "
+                "'cafe', :st, 2, 60, :e, 'full', 2, 'approved', :pub, :chat,"
+                "'company', 'coffee') RETURNING id"
             ),
             {
                 "a": author.id,
                 "p": place_id,
-                "s": settings.default_community_slug,
+                "s": settings.default_city_slug,
                 "st": starts,
                 "e": starts - timedelta(hours=1),
                 "pub": starts - timedelta(days=1),

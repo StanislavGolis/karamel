@@ -36,8 +36,8 @@ pytestmark = [
 ]
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 def _future(**delta: int) -> datetime:
@@ -89,10 +89,10 @@ async def _place(session: AsyncSession, *, slug: str | None = None) -> int:
     """Место сообщества и его внутренний `id` (нужен для FK карточки)."""
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug or _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug or _city()},
     )
     return int(row.scalar_one())
 
@@ -107,23 +107,24 @@ async def _insert_card(
     filled_count: int = 0,
     starts_at: datetime | None = None,
     expires_at: datetime | None = None,
-    community_slug: str | None = None,
+    city_slug: str | None = None,
 ) -> str:
     """Карточка в нужном состоянии — сырым SQL, минуя правила сервиса."""
     starts = starts_at or _future(days=3)
     expires = expires_at or (starts - timedelta(hours=1))
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, "
-            "60, :expires, :status, :filled, 'approved', :published_at) RETURNING uuid"
+            "60, :expires, :status, :filled, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": community_slug or _community(),
+            "slug": city_slug or _city(),
             "starts": starts,
             "capacity": capacity,
             "expires": expires,
@@ -294,12 +295,12 @@ async def test_own_card_returns_403(client: AsyncClient, session: AsyncSession) 
     assert await _requests(session, card_uuid) == []
 
 
-async def test_other_community_card_is_indistinguishable_from_missing(
+async def test_other_city_card_is_indistinguishable_from_missing(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-07 (ADR-13): чужое сообщество и отсутствие карточки — ОДИН ответ.
 
-    Краснеет, если убрать `community_slug` из запроса: карточка другого
+    Краснеет, если убрать `city_slug` из запроса: карточка другого
     сообщества стала бы доступна (утечка), а если добавить разный код для двух
     случаев — существование чужой карточки раскрылось бы перебором.
     """
@@ -309,7 +310,7 @@ async def test_other_community_card_is_indistinguishable_from_missing(
         session,
         author_id=author.id,
         place_id=await _place(session, slug="kemerovo"),
-        community_slug="kemerovo",
+        city_slug="kemerovo",
     )
 
     foreign_response = await _post(client, foreign, token)

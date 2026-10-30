@@ -291,3 +291,40 @@ def clean_database(migrated_database: None) -> Generator[None]:
     yield
     if DATABASE_URL:
         asyncio.run(_truncate_domain_tables())
+
+
+# ——— Стори 12.9 (AC-4, W-11.4-d): защита DDL-тестов от xdist ——————————————
+#
+# **Дефект.** Все DDL-тесты (`pytest.mark.ddl`, 10 файлов, 26 вызовов
+# `command.downgrade`) исполняют `alembic.command` на ОБЩЕЙ схеме: сессионная
+# `migrated_database` поднимает её до `head` ОДИН раз, изоляции по схеме нет
+# (`search_path`/`schema_translate_map`/`CREATE SCHEMA` — 0 совпадений по
+# репозиторию, замер CS 12.9). Под `-n auto` воркер, читающий `event_cards` в
+# момент, когда другой воркер гонит `downgrade 0037`, получает «relation does
+# not exist» — падение НЕ на своём дефекте.
+#
+# **Почему хук, а не `skipif` на маркере.** `skipif` пришлось бы повторить в
+# 10 файлах — 10 мест, где защиту можно забыть при добавлении 11-го
+# DDL-теста. Хук — одна точка.
+#
+# **Почему `add_marker`, а не `pytest.skip()`.** В `pytest_collection_modifyitems`
+# `pytest.skip()` бросает `Skipped` из хука сбора, и часть плагинов обрабатывает
+# это как ошибку сбора. `add_marker(pytest.mark.skip(...))` — штатный способ:
+# тест попадает в `skipped` с причиной.
+#
+# Проверяется **эффект** (P-25): под `PYTEST_XDIST_WORKER` все `ddl`-тесты
+# получают `skip` с причиной, без него — ни одного `skip`
+# (`tests/unit/test_ddl_marker_guard.py`, пара мутаций M13/M14).
+DDL_SKIP_REASON = "DDL меняет общую схему и несовместим с xdist; гоните `pytest -m ddl` без `-n`"
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Пропускает DDL-тесты, если прогон идёт под xdist (AC-4, W-11.4-d)."""
+    if not os.environ.get("PYTEST_XDIST_WORKER"):
+        return
+    ddl_marker = pytest.mark.ddl
+    for item in items:
+        if ddl_marker.name in item.keywords:
+            item.add_marker(pytest.mark.skip(reason=DDL_SKIP_REASON))

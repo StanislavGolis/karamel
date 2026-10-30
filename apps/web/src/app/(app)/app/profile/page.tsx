@@ -81,7 +81,7 @@ async function loadProfile(cookieHeader: string): Promise<ProfileState> {
     const payload = (await response.json()) as {
       name?: string | null;
       city?: string | null;
-      age?: number | null;
+
       bio?: string | null;
     };
 
@@ -90,9 +90,11 @@ async function loadProfile(cookieHeader: string): Promise<ProfileState> {
       values: {
         name: payload.name ?? "",
         city: payload.city ?? "",
-        // Число → строка: `value` поля ввода должно быть строкой, иначе React
-        // ругается на смену контролируемости при пустом возрасте.
-        age: payload.age === null || payload.age === undefined ? "" : String(payload.age),
+        // Стори 12.2, AC-3: `birth_date` наружу не отдаётся (ADR-18),
+        // поэтому поле приходит пустым — это норма. `age` в ответе есть,
+        // но это вычисленное значение, а не исходные данные: подставлять
+        // его в поле даты значило бы сохранить неверную дату.
+        birthDate: "",
         bio: payload.bio ?? "",
       },
     };

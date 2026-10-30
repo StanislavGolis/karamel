@@ -55,8 +55,8 @@ async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
     app.dependency_overrides.pop(get_session, None)
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 async def _new_user(session: AsyncSession) -> tuple[User, str]:
@@ -80,10 +80,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _city()},
     )
     return int(row.scalar_one())
 
@@ -96,21 +96,22 @@ async def _insert_card(
     capacity: int = 4,
     filled_count: int = 0,
     status: str = "published",
-    community_slug: str | None = None,
+    city_slug: str | None = None,
 ) -> tuple[str, int]:
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, 60, "
-            ":expires, :status, :filled, 'approved', :published_at) RETURNING uuid, id"
+            ":expires, :status, :filled, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": community_slug or _community(),
+            "slug": city_slug or _city(),
             "starts": starts,
             "capacity": capacity,
             "expires": starts - timedelta(hours=1),
@@ -299,6 +300,7 @@ async def test_full_card_returns_card_is_full_not_not_accepting(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-08 (FR84): `full` → `409 CARD_IS_FULL`, отличный от `CARD_NOT_ACCEPTING`.
+    П8 (FR84): `filled_count == capacity` → карточка `full`, вход закрыт.
 
     Краснеет, если коды слить: клиент не отличит «мест нет» (можно вернуться
     после отмены участия, 5а.6) от «набор закрыт» (окончательно).
@@ -510,12 +512,12 @@ async def test_missing_card_returns_card_not_found(
     assert response.json() == {"code": "card_not_found"}
 
 
-async def test_foreign_community_card_is_indistinguishable_from_missing(
+async def test_foreign_city_card_is_indistinguishable_from_missing(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-11 (ADR-13): чужая карточка и несуществующая дают ОДИН ответ.
 
-    Краснеет, если срез `community_slug` убрать из SQL и проверять после
+    Краснеет, если срез `city_slug` убрать из SQL и проверять после
     выборки: тела ответов разошлись бы (`403`/`409` против `404`), и перебор
     `uuid` раскрыл бы существование карточек чужого сообщества.
     """
@@ -523,7 +525,7 @@ async def test_foreign_community_card_is_indistinguishable_from_missing(
     _, token = await _new_user(session)
     place_id = await _place(session)
     card_uuid, _ = await _insert_card(
-        session, author_id=author.id, place_id=place_id, capacity=4, community_slug="othertown"
+        session, author_id=author.id, place_id=place_id, capacity=4, city_slug="othertown"
     )
 
     foreign = await _join(client, token, card_uuid)

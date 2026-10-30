@@ -33,8 +33,8 @@ pytestmark = [
 ]
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 class _NoLimit:
@@ -71,10 +71,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession, *, slug: str | None = None) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug or _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug or _city()},
     )
     return int(row.scalar_one())
 
@@ -85,21 +85,21 @@ async def _insert_card(
     author_id: int,
     place_id: int,
     title: str = "Встреча",
-    community_slug: str | None = None,
+    city_slug: str | None = None,
 ) -> str:
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, :title, NULL, 'cafe', :starts, 1, 60, :expires, "
-            "'published', 0, 'approved', :published_at) RETURNING uuid"
+            "'published', 0, 'approved', :published_at, 'company', 'coffee') RETURNING uuid"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": community_slug or _community(),
+            "slug": city_slug or _city(),
             "title": title,
             "starts": starts,
             "expires": starts - timedelta(hours=1),
@@ -158,6 +158,7 @@ async def _get(client: AsyncClient, token: str, cursor: str | None = None) -> An
 
 async def test_not_selected_is_never_returned(client: AsyncClient, session: AsyncSession) -> None:
     """AC-03 (FR81): `not_selected` ЛЕЖИТ в БД и НЕ появляется в выдаче.
+    П5 (FR81): `not_selected` не появляется ни в одном ответе заявителю.
 
     Краснеет, если заменить `JOIN_REQUEST_VISIBLE_STATUSES` на все статусы
     или на `status <> 'not_selected'` (последнее протекает на будущих
@@ -310,7 +311,7 @@ async def test_broken_cursor_gives_422(client: AsyncClient, session: AsyncSessio
 # --- AC-07: автор, место, фото --------------------------------------------
 
 
-async def test_foreign_community_requests_are_not_returned(
+async def test_foreign_city_requests_are_not_returned(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-07, ADR-01: заявка на карточку чужого сообщества не попадает в выдачу.
@@ -322,7 +323,7 @@ async def test_foreign_community_requests_are_not_returned(
     applicant, token = await _new_user(session)
     place_id = await _place(session, slug="other-city")
     card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place_id, community_slug="other-city"
+        session, author_id=author.id, place_id=place_id, city_slug="other-city"
     )
     card_id = await _card_id(session, card_uuid)
     await _insert_request(session, card_id=card_id, applicant_id=applicant.id)

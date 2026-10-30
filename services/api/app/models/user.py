@@ -8,7 +8,7 @@ AC-01: состав колонок зафиксирован стори. `id` —
 
 История 10.1: механика лайков (`likes_used_today`, `likes_counted_on`, CHECK
 `likes_non_negative`) удалена вместе с колонками — разворот Action-first снял
-ось лайков, обращений в коде не осталось. Взамен добавлен `community_slug`
+ось лайков, обращений в коде не осталось. Взамен добавлен `city_slug`
 (ADR-01): ось показа — сообщество, а не город.
 """
 
@@ -73,13 +73,22 @@ class User(TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
     consent_given_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Стори 11.4 (AC-1, AC-2; NFR36; долг `W-10.4-b`): версия текста правил,
+    # которую пользователь подтвердил ПОСЛЕДНЕЙ. `NULL` — версия неизвестна
+    # (все учётки до миграции `0034`): выдуманная «1.0» была бы утверждением
+    # о юридически значимом факте, которого никто не проверял.
+    #
+    # `String(16)` и `nullable=True` обязаны совпадать с миграцией `0034`,
+    # иначе `alembic check` предложит удалить колонку (P-13). `server_default`
+    # НЕ ставится по той же причине: миграция его не создаёт.
+    consent_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # AC-01, ADR-01: срез сообщества. FK нет — таблицы `communities` не
     # существует. Форму держит regex-CHECK ниже; значения сверяет
-    # `UserRepository.create` (`_validate_community_slug`, DN-3 CR 10.1) —
+    # `UserRepository.create` (`_validate_city_slug`, DN-3 CR 10.1) —
     # то есть только путь через репозиторий, а не сырой SQL и не воркер.
     # `server_default` НЕ ставится: миграция 0032 снимает дефолт, иначе
     # `alembic check` разойдётся со схемой.
-    community_slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    city_slug: Mapped[str] = mapped_column(String(64), nullable=False)
     deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Решение 1 CR 1.5: момент отзыва всех сессий (выход, бан). Access-токен
     # живёт час и не сверяется с БД по `jti`, поэтому отзыв доказывается
@@ -128,9 +137,9 @@ class User(TimestampMixin, Base):
         ),
         # Пустой телефон неотличим от отсутствующего, но занимает слот в UNIQUE навсегда.
         CheckConstraint("phone IS NULL OR length(btrim(phone)) > 0", name="phone_not_blank"),
-        # AC-01, ADR-01: тот же шаблон, что в `ck_places_community_slug`.
+        # AC-01, ADR-01: тот же шаблон, что в `ck_places_city_slug`.
         # Расхождение с `Settings._COMMUNITY_SLUG_RE` дало бы 500 на сохранении.
-        CheckConstraint("community_slug ~ '^[a-z0-9_-]{3,64}$'", name="community_slug"),
+        CheckConstraint("city_slug ~ '^[a-z0-9_-]{3,64}$'", name="city_slug"),
         # индексы очереди модерации/бан-листов
         Index("idx_users_status", "status"),
         # Стори 10.2, D-10.2-2: частичный индекс под предикат воркера ретенции

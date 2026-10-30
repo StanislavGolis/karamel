@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "paths": [],
+  "documentedPaths": [
+    "components/chat/chat-list.tsx",
+    "components/chat/chat-screen.tsx",
+    "components/chat/connection-indicator.tsx",
+    "components/chat/system-message.tsx",
+    "components/notifications/notification-settings.tsx",
+    "components/profile/photo-placeholder.tsx",
+    "components/profile/profile-form.tsx",
+    "components/profile/profile-photos.tsx",
+    "components/requests/request-list.tsx",
+    "components/requests/request-list-row.tsx",
+    "components/support/support-form.tsx",
+    "components/support/support-list.tsx",
+    "components/support/support-tickets-board.tsx",
+    "components/ui/consent-form.tsx",
+    "components/ui/empty-state.tsx",
+    "components/ui/logout-button.tsx",
+    "components/ui/phone-login-form.tsx"
+  ],
+  "note": "Стори 11.9, AC-6…AC-8. Замер 2026-10-27: все 17 файлов со status=legacy в design-system.manifest.json содержат 0 литеральных цветов (поиск #[0-9a-fA-F]{3,8}|rgb(|hsl( после вырезания комментариев). Исключать нечего, поэтому paths пуст. Добавление пути сюда — регресс ratchet: тест gate1-ratchet проверяет, что paths пуст и documentedPaths равен 17."
+}

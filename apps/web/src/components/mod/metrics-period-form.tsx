@@ -65,7 +65,7 @@ export function MetricsPeriodForm({ period }: MetricsPeriodFormProps) {
                 className={`inline-flex min-h-11 items-center rounded-md border px-4 text-sm underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
                   isActive
                     ? "border-accent bg-accent text-accent-ink"
-                    : "border-border-input bg-surface-raised text-ink-secondary hover:bg-surface"
+                    : "border-border-input bg-surface-raised text-ink-secondary hover:bg-surface-hover"
                 }`}
               >
                 {PRESET_LABELS[days] ?? `${days} дней`}
@@ -99,7 +99,7 @@ export function MetricsPeriodForm({ period }: MetricsPeriodFormProps) {
         </label>
         <button
           type="submit"
-          className="inline-flex min-h-11 items-center rounded-md border border-border-input bg-surface-raised px-4 text-sm font-medium text-ink hover:bg-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          className="inline-flex min-h-11 items-center rounded-md border border-border-input bg-surface-raised px-4 text-sm font-medium text-ink hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           Показать
         </button>

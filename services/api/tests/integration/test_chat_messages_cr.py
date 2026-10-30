@@ -60,14 +60,14 @@ async def _company(session: AsyncSession) -> tuple[str, int, str, int]:
     member_id, member_token = await _user(session)
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, :cat, :addr, :s, true) RETURNING id"
         ),
         {
             "n": "P" + uuid_lib.uuid4().hex[:8],
             "cat": "cafe",
             "addr": "addr",
-            "s": settings.default_community_slug,
+            "s": settings.default_city_slug,
         },
     )
     place_id = int(place.scalar_one())
@@ -75,15 +75,16 @@ async def _company(session: AsyncSession) -> tuple[str, int, str, int]:
     chat_uuid = str(uuid_lib.uuid4())
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, category, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, category, "
             "starts_at, capacity, decision_window_minutes, expires_at, status, filled_count, "
-            "verification_status, published_at, chat_uuid) VALUES (:a, :p, :s, :t, :cat, "
-            ":st, 2, 60, :e, :status, 2, :ver, :pub, :chat) RETURNING id"
+            "verification_status, published_at, chat_uuid,"
+            "kind, activity) VALUES (:a, :p, :s, :t, :cat, "
+            ":st, 2, 60, :e, :status, 2, :ver, :pub, :chat, 'company', 'coffee') RETURNING id"
         ),
         {
             "a": author_id,
             "p": place_id,
-            "s": settings.default_community_slug,
+            "s": settings.default_city_slug,
             "t": "T",
             "cat": "cafe",
             "st": starts,

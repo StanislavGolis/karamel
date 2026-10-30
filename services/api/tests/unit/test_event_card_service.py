@@ -21,6 +21,7 @@ from app.schemas.event_card import EventCardCreate, EventCardUpdate
 from app.services.event_card_service import (
     CARD_LIMIT_REACHED_CODE,
     CARD_REJECTED_CODE,
+    CARD_STARTS_AT_TOO_FAR_CODE,
     CARD_VERIFICATION_PENDING_CODE,
     CardDecisionWindowRequiredError,
     CardLimitReachedError,
@@ -28,6 +29,7 @@ from app.services.event_card_service import (
     CardNotFoundError,
     CardRejectedError,
     CardStartsAtInPastError,
+    CardStartsAtTooFarError,
     CardVerificationPendingError,
     create_card,
     publish_card,
@@ -47,8 +49,8 @@ class _Settings:
     `AttributeError` (то есть тест ловит реальную несовместимость протокола).
     """
 
-    default_community_slug = "tomsk"
-    community_slugs = ("tomsk",)
+    default_city_slug = "tomsk"
+    city_slugs = ("tomsk",)
     card_default_decision_window_minutes = 2880
     card_content_stop_words = ("казино", "займ")
     # Стори 4.4: лимит активных карточек. Дефолт 2 — верхняя граница MVP.
@@ -156,6 +158,9 @@ def _payload(**overrides: Any) -> EventCardCreate:
         "place_uuid": PLACE_UUID,
         "starts_at": STARTS_AT,
         "capacity": 3,
+        # Стори 12.4 (AC-3, FR117/FR118): тип и активность обязательны.
+        "kind": "company",
+        "activity": "boardgames",
     }
     values.update(overrides)
     return EventCardCreate(**values)
@@ -166,8 +171,11 @@ def _card(**overrides: Any) -> EventCard:
     values: dict[str, Any] = {
         "author_id": 7,
         "place_id": 42,
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
         "title": "Настольные игры",
+        # Стори 12.4 (AC-1): поля NOT NULL в модели.
+        "kind": "company",
+        "activity": "boardgames",
         "category": "cafe",
         "starts_at": STARTS_AT,
         "capacity": 3,
@@ -311,7 +319,7 @@ def test_create_initial_state_is_draft_with_auto_check() -> None:
     assert card.verified_at == NOW
     assert card.verified_by is None
     assert card.filled_count == 0
-    assert card.community_slug == "tomsk"
+    assert card.city_slug == "tomsk"
 
 
 def test_create_stop_word_stays_pending() -> None:
@@ -772,3 +780,134 @@ async def test_publish_reads_card_again_after_cas() -> None:
 
     assert published is after
     assert published.status == EventCardStatus.PUBLISHED
+
+
+# --- Стори 12.5: горизонт 72 часа (AC-01, AC-02, FR116, ADR-21) ------------
+#
+# `now` — параметр сервиса, а не `datetime.now()` внутри: иначе граница
+# воспроизводима только в день написания (урок 12.2). Граница ВКЛЮЧИТЕЛЬНАЯ:
+# ровно 72 часа — допустимо, `+1 с` — отказ.
+
+
+async def test_create_rejects_starts_at_beyond_horizon() -> None:
+    """AC-01: `now + 72 ч + 1 с` → `CardStartsAtTooFarError` (U-2).
+
+    Краснеет, если убрать проверку горизонта из `create_card` (U-2) или
+    поменять знак сравнения так, что «дальше» станет допустимым.
+    """
+    with pytest.raises(CardStartsAtTooFarError) as error:
+        await create_card(
+            _FakeSession(),  # type: ignore[arg-type]
+            author_id=7,
+            payload=_payload(starts_at=NOW + timedelta(hours=72, seconds=1)),
+            settings=_Settings(),  # type: ignore[arg-type]
+            now=NOW,
+            repository=_FakeRepository(),  # type: ignore[arg-type]
+        )
+
+    assert error.value.code == CARD_STARTS_AT_TOO_FAR_CODE
+    assert error.value.code == "STARTS_AT_TOO_FAR"
+
+
+async def test_create_accepts_exactly_horizon_boundary() -> None:
+    """AC-01: ровно `now + 72 ч` → успех (U-1).
+
+    Пара к `test_create_rejects_starts_at_beyond_horizon`: без неё мутация
+    «сравнение `<` вместо `<=`» не отличается от «роут всегда 422».
+    Краснеет, если `<` заменить на `<=` ИЛИ сдвинуть константу вниз.
+    """
+    repo = _FakeRepository()
+
+    card = await create_card(
+        _FakeSession(),  # type: ignore[arg-type]
+        author_id=7,
+        payload=_payload(starts_at=NOW + timedelta(hours=72)),
+        settings=_Settings(),  # type: ignore[arg-type]
+        now=NOW,
+        repository=repo,  # type: ignore[arg-type]
+    )
+
+    assert card.starts_at == NOW + timedelta(hours=72)
+    assert len(repo.added) == 1
+
+
+async def test_create_accepts_just_inside_horizon() -> None:
+    """AC-01: `now + 72 ч - 1 с` → успех.
+
+    Краснеет, если горизонт уменьшить (например, 71 час): «почти граница»
+    перестала бы создаваться, и автор терял бы законный час.
+    """
+    repo = _FakeRepository()
+
+    card = await create_card(
+        _FakeSession(),  # type: ignore[arg-type]
+        author_id=7,
+        payload=_payload(starts_at=NOW + timedelta(hours=72, seconds=-1)),
+        settings=_Settings(),  # type: ignore[arg-type]
+        now=NOW,
+        repository=repo,  # type: ignore[arg-type]
+    )
+
+    assert len(repo.added) == 1
+    assert card.starts_at == NOW + timedelta(hours=72, seconds=-1)
+
+
+async def test_create_past_wins_over_too_far() -> None:
+    """AC-01, U-5: порядок проверок «прошлое → далеко».
+
+    Прошедшая дата при одновременном нарушении горизонта даёт `InPast`:
+    причина «уже прошло» информативнее для человека.
+    Краснеет, если переставить блоки: на прошедшей дате придёт `TOO_FAR`.
+    """
+    with pytest.raises(CardStartsAtInPastError):
+        await create_card(
+            _FakeSession(),  # type: ignore[arg-type]
+            author_id=7,
+            payload=_payload(starts_at=NOW - timedelta(days=30)),
+            settings=_Settings(),  # type: ignore[arg-type]
+            now=NOW,
+            repository=_FakeRepository(),  # type: ignore[arg-type]
+        )
+
+
+async def test_update_rejects_starts_at_beyond_horizon() -> None:
+    """AC-01, U-3: `PATCH` не обходит горизонт.
+
+    Краснеет, если убрать проверку из `update_card`: «создать нельзя,
+    сдвинуть можно» — обход правила.
+    """
+    with pytest.raises(CardStartsAtTooFarError) as error:
+        await update_card(
+            _FakeSession(),  # type: ignore[arg-type]
+            author_id=7,
+            card_uuid=uuid_lib.uuid4(),
+            payload=EventCardUpdate(starts_at=NOW + timedelta(hours=72, seconds=1)),
+            settings=_Settings(),  # type: ignore[arg-type]
+            now=NOW,
+            repository=_FakeRepository(card=_card()),  # type: ignore[arg-type]
+        )
+
+    assert error.value.code == CARD_STARTS_AT_TOO_FAR_CODE
+
+
+async def test_update_without_starts_at_still_works() -> None:
+    """AC-01, U-4: `PATCH` заголовка без времени не требует `starts_at`.
+
+    Пара к `test_update_rejects_starts_at_beyond_horizon`: без неё мутация
+    «вынести проверку из `if`» не отличается от «`PATCH` сломан целиком».
+    Краснеет, если гард горизонта вынести за `if payload.starts_at is not None`.
+    """
+    card = _card()
+
+    updated = await update_card(
+        _FakeSession(),  # type: ignore[arg-type]
+        author_id=7,
+        card_uuid=uuid_lib.uuid4(),
+        payload=EventCardUpdate(title="Новое название"),
+        settings=_Settings(),  # type: ignore[arg-type]
+        now=NOW,
+        repository=_FakeRepository(card=card),  # type: ignore[arg-type]
+    )
+
+    assert updated.title == "Новое название"
+    assert updated.starts_at == card.starts_at

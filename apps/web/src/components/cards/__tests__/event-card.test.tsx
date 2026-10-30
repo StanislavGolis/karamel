@@ -25,6 +25,15 @@ function makeCard(overrides: Partial<FeedCard> = {}): FeedCard {
     title: "Кино в субботу",
     description: null,
     category: "cinema",
+    // Стори 12.4 (AC-3): `kind` и `activity` обязательны в `FeedCard`.
+    // Без них фикстура не типизируется, и `tsc --noEmit` краснеет (Task 9.3).
+    kind: "date",
+    activity: "cinema",
+    // Стори 12.6 (AC-2, Task 7.3): рамки в `FeedCard` обязательны в типе.
+    // `null` — «не задано»: подпись рамок в этом случае НЕ рисуется.
+    gender_filter: null,
+    age_min: null,
+    age_max: null,
     starts_at: "2026-11-01T19:00:00+03:00",
     expires_at: "2026-10-31T13:00:00+03:00",
     server_time: "2026-10-25T20:00:00+03:00",

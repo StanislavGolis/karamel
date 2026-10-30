@@ -1,11 +1,11 @@
 """Изоляция сообществ при чтении карточки (стори 10.1; AC-05, ADR-13).
 
 **Что доказывается.** Срез сообщества при чтении берётся из
-`users.community_slug` зрителя, а НЕ из `settings.default_community_slug`.
+`users.city_slug` зрителя, а НЕ из `settings.default_city_slug`.
 До 10.1 источником был конфиг, и участник «другого сообщества» физически
 не мог получить `404` — оба читали один и тот же слаг.
 
-**Почему сервисный уровень, а не API.** Роутер передаёт `user.community_slug`
+**Почему сервисный уровень, а не API.** Роутер передаёт `user.city_slug`
 одной строкой; если проверять только через API, тест останется зелёным при
 любой реализации внутри `get_card`. Здесь параметр задаётся явно — тест
 краснеет ровно тогда, когда сервис снова начнёт читать конфиг.
@@ -41,8 +41,8 @@ class _CardSettings:
     `AttributeError` на живом коде — тест проверял бы заглушку.
     """
 
-    default_community_slug = settings.default_community_slug
-    community_slugs = (settings.default_community_slug,)
+    default_city_slug = settings.default_city_slug
+    city_slugs = (settings.default_city_slug,)
     card_default_decision_window_minutes = 60
     card_content_stop_words: tuple[str, ...] = ()
     card_active_limit = 2
@@ -53,7 +53,7 @@ async def _user(session: AsyncSession, slug: str) -> int:
     phone = f"+7913{uuid_lib.uuid4().int % 10**7:07d}"
     row = await session.execute(
         text(
-            "INSERT INTO users (provider, provider_user_id, phone, community_slug) "
+            "INSERT INTO users (provider, provider_user_id, phone, city_slug) "
             "VALUES ('phone', :p, :p, :slug) RETURNING id"
         ),
         {"p": phone, "slug": slug},
@@ -67,7 +67,7 @@ async def _card(session: AsyncSession, author_id: int, slug: str) -> uuid_lib.UU
     place_id = (
         await session.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug) "
+                "INSERT INTO places (name, category, address_text, city_slug) "
                 "VALUES (:n, 'cafe', 'пр. Ленина, 1', :slug) RETURNING id"
             ),
             {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug},
@@ -75,11 +75,11 @@ async def _card(session: AsyncSession, author_id: int, slug: str) -> uuid_lib.UU
     ).scalar_one()
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, "
             "description, category, starts_at, capacity, decision_window_minutes, "
-            "expires_at, status, filled_count, verification_status, published_at) "
+            "expires_at, status, filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:a, :p, :slug, 'Встреча', NULL, 'cafe', :starts, 3, 60, "
-            ":expires, 'published', 0, 'approved', now()) RETURNING uuid"
+            ":expires, 'published', 0, 'approved', now(), 'company', 'coffee') RETURNING uuid"
         ),
         {
             "a": author_id,
@@ -92,13 +92,13 @@ async def _card(session: AsyncSession, author_id: int, slug: str) -> uuid_lib.UU
     return uuid_lib.UUID(str(row.scalar_one()))
 
 
-async def test_own_community_reads_card(session: AsyncSession) -> None:
+async def test_own_city_reads_card(session: AsyncSession) -> None:
     """AC-05, базовая линия (P-19): свой слаг — карточка ДОСТУПНА.
 
     Без этой половины следующий тест был бы зелёным при реализации,
     возвращающей `404` на любую карточку.
     """
-    slug = settings.default_community_slug
+    slug = settings.default_city_slug
     author = await _user(session, slug)
     card_uuid = await _card(session, author, slug)
 
@@ -106,21 +106,21 @@ async def test_own_community_reads_card(session: AsyncSession) -> None:
         session,
         card_uuid=card_uuid,
         viewer_id=author,
-        viewer_community_slug=slug,
+        viewer_city_slug=slug,
         settings=_CardSettings(),
     )
     assert item.card.uuid == card_uuid
 
 
-async def test_other_community_gets_404(session: AsyncSession) -> None:
+async def test_other_city_gets_404(session: AsyncSession) -> None:
     """AC-05, ADR-13: участник другого сообщества получает `404`, не `403`.
 
     Краснеет ровно тогда, когда `get_card` снова начнёт брать слаг из
-    `settings.default_community_slug`: конфиг один, и карточка нашлась бы
+    `settings.default_city_slug`: конфиг один, и карточка нашлась бы
     независимо от сообщества зрителя.
     """
-    author = await _user(session, settings.default_community_slug)
-    card_uuid = await _card(session, author, settings.default_community_slug)
+    author = await _user(session, settings.default_city_slug)
+    card_uuid = await _card(session, author, settings.default_city_slug)
     stranger = await _user(session, "other-city")
 
     with pytest.raises(CardNotFoundError):
@@ -128,20 +128,20 @@ async def test_other_community_gets_404(session: AsyncSession) -> None:
             session,
             card_uuid=card_uuid,
             viewer_id=stranger,
-            viewer_community_slug="other-city",
+            viewer_city_slug="other-city",
             settings=_CardSettings(),
         )
 
 
-async def test_other_community_feed_is_empty(session: AsyncSession) -> None:
+async def test_other_city_feed_is_empty(session: AsyncSession) -> None:
     """AC-05, задача 5.5 (CR 10.1, P-04): лента чужого сообщества пуста.
 
     Вторая из двух точек чтения (`event_card_service.py:941`). До этого теста
-    `list_cards` не покрывался ничем: мутация «вернуть `_resolve_community_slug`
+    `list_cards` не покрывался ничем: мутация «вернуть `_resolve_city_slug`
     в `:941`» выживала, потому что все пользователи в тестах получали слаг
     из конфига, и обе реализации давали одинаковый результат.
     """
-    slug = settings.default_community_slug
+    slug = settings.default_city_slug
     author = await _user(session, slug)
     await _card(session, author, slug)
     stranger = await _user(session, "other-city")
@@ -149,7 +149,7 @@ async def test_other_community_feed_is_empty(session: AsyncSession) -> None:
     page = await list_cards(
         session,
         viewer_id=stranger,
-        viewer_community_slug="other-city",
+        viewer_city_slug="other-city",
         settings=_CardSettings(),
     )
 
@@ -157,20 +157,20 @@ async def test_other_community_feed_is_empty(session: AsyncSession) -> None:
     assert page.total == 0
 
 
-async def test_own_community_feed_is_not_empty(session: AsyncSession) -> None:
+async def test_own_city_feed_is_not_empty(session: AsyncSession) -> None:
     """AC-05, P-19: базовая линия — своя лента НЕ пуста.
 
     Без этой половины предыдущий тест был бы зелёным и при полностью
     сломанном фильтре, возвращающем пустоту всегда.
     """
-    slug = settings.default_community_slug
+    slug = settings.default_city_slug
     author = await _user(session, slug)
     card_uuid = await _card(session, author, slug)
 
     page = await list_cards(
         session,
         viewer_id=author,
-        viewer_community_slug=slug,
+        viewer_city_slug=slug,
         settings=_CardSettings(),
     )
 

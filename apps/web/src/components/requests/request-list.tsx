@@ -37,6 +37,17 @@ export type CardRequestsItem = {
   submitted_at: string;
   message: string;
   person: CardRequestsPerson;
+  /**
+   * Стори 12.6 (AC-3, Task 7.4): проходит ли заявитель рамки карточки.
+   *
+   * `true`/`false` — рамки заданы и вердикт известен; `null` — рамок нет
+   * («проверять нечего»). Поле приходит ТОЛЬКО автору: в `GET /my/requests`
+   * его нет (AC-4), и заявитель не узнаёт, что его отсеяли по возрасту.
+   *
+   * Обязательное, без умолчания: умолчание `true` сделало бы «вне рамок» и
+   * «забыли заполнить» неотличимыми.
+   */
+  within_bounds: boolean | null;
 };
 
 export type CardRequestsResponse = {
@@ -152,6 +163,7 @@ export function RequestList({ state, cardStatus }: RequestListProps) {
             message={item.message}
             selectionAvailable={selectionAvailable && mode === "requests"}
             cardPublished={cardStatus === "published"}
+            withinBounds={item.within_bounds}
           />
         ))}
       </ul>

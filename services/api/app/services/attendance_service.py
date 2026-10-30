@@ -133,7 +133,7 @@ async def _load_card(
     *,
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
-    viewer_community_slug: str,
+    viewer_city_slug: str,
     settings: AttendanceSettings,
     now: datetime,
 ) -> tuple[CardFeedItem, bool]:
@@ -156,7 +156,7 @@ async def _load_card(
             card_uuid=card_uuid,
             viewer_id=viewer_id,
             # AC-05 стори 10.1: срез сообщества — колонка пользователя.
-            viewer_community_slug=viewer_community_slug,
+            viewer_city_slug=viewer_city_slug,
             settings=settings,
             now=now,
         )
@@ -228,7 +228,7 @@ async def get_attendance(
     *,
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
-    viewer_community_slug: str,
+    viewer_city_slug: str,
     settings: AttendanceSettings,
     now: datetime | None = None,
 ) -> AttendanceState:
@@ -246,7 +246,7 @@ async def get_attendance(
         session,
         card_uuid=card_uuid,
         viewer_id=viewer_id,
-        viewer_community_slug=viewer_community_slug,
+        viewer_city_slug=viewer_city_slug,
         settings=settings,
         now=moment,
     )
@@ -279,7 +279,7 @@ async def confirm_attendance(
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
     arrived: bool,
-    viewer_community_slug: str,
+    viewer_city_slug: str,
     settings: AttendanceSettings,
     now: datetime | None = None,
 ) -> AttendanceState:
@@ -298,7 +298,7 @@ async def confirm_attendance(
         session,
         card_uuid=card_uuid,
         viewer_id=viewer_id,
-        viewer_community_slug=viewer_community_slug,
+        viewer_city_slug=viewer_city_slug,
         settings=settings,
         now=moment,
     )

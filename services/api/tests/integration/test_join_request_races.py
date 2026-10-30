@@ -39,7 +39,7 @@ COMMUNITY = "tomsk"
 class _Settings:
     """Минимум настроек сервиса: протокол `JoinRequestSettings` без чтения `.env`."""
 
-    default_community_slug = COMMUNITY
+    default_city_slug = COMMUNITY
     join_request_active_limit = 2
 
 
@@ -114,7 +114,7 @@ async def _seed_card(
     async with factory() as session:
         place_row = await session.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
             ),
             {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": COMMUNITY},
@@ -123,11 +123,12 @@ async def _seed_card(
         starts = datetime.now(UTC) + timedelta(days=3)
         card_row = await session.execute(
             text(
-                "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+                "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
                 "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-                "filled_count, verification_status, published_at) "
+                "filled_count, verification_status, published_at, kind, activity) "
                 "VALUES (:author, :place, :slug, 'Гонка', NULL, 'cafe', :starts, :capacity, "
-                "60, :expires, 'published', 0, 'approved', :published_at) RETURNING uuid"
+                "60, :expires, 'published', 0, 'approved', :published_at,"
+                "'company', 'coffee') RETURNING uuid"
             ),
             {
                 "author": author_id,

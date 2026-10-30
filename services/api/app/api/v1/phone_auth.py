@@ -412,7 +412,7 @@ async def verify(
             {
                 "code": error.code,
                 "message": "сообщество пользователя не сконфигурировано",
-                "details": {"community_slug": error.community_slug},
+                "details": {"city_slug": error.city_slug},
             },
             status_code=422,
         )

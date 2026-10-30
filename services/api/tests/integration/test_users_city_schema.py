@@ -1,11 +1,11 @@
-"""Схема `users.community_slug` и удаление лайков (стори 10.1; AC-01, AC-02).
+"""Схема `users.city_slug` и удаление лайков (стори 10.1; AC-01, AC-02).
 
 Проверки идут через `information_schema` и `pg_constraint`, а не через модель:
 модель описывает намерение, а AC говорит о фактической схеме. Тест на модели
 прошёл бы и при расхождении миграции `0032` с моделью.
 
 §18.1: CHECK проверяется НАРУШЕНИЕМ, а не чтением каталога. Наличие
-`ck_users_community_slug` в `pg_constraint` не доказывает, что он что-то
+`ck_users_city_slug` в `pg_constraint` не доказывает, что он что-то
 запрещает — каталог используется только для проверки ИМЁН (они часть
 контракта, `op.f`, §18.7).
 """
@@ -37,7 +37,7 @@ def _user(**overrides: object) -> dict[str, object]:
         "provider": "phone",
         "provider_user_id": phone,
         "phone": phone,
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
     }
     base.update(overrides)
     return base
@@ -47,8 +47,8 @@ async def _insert_user(session: AsyncSession, **overrides: object) -> None:
     values = _user(**overrides)
     await session.execute(
         text(
-            "INSERT INTO users (provider, provider_user_id, phone, community_slug) "
-            "VALUES (:provider, :provider_user_id, :phone, :community_slug)"
+            "INSERT INTO users (provider, provider_user_id, phone, city_slug) "
+            "VALUES (:provider, :provider_user_id, :phone, :city_slug)"
         ),
         values,
     )
@@ -57,29 +57,29 @@ async def _insert_user(session: AsyncSession, **overrides: object) -> None:
 # --- AC-01: колонка и её свойства ------------------------------------------------
 
 
-async def test_community_slug_is_not_null(session: AsyncSession) -> None:
+async def test_city_slug_is_not_null(session: AsyncSession) -> None:
     """AC-01: `NOT NULL` БЕЗ дефолта — схема не хранит «магическое» значение.
 
     Краснеет двумя способами: если миграция не сняла `DEFAULT` (тогда
     `column_default` не пуст) и если `NOT NULL` пропал (тогда `is_nullable='YES'`).
     Второе означало бы, что пользователь без сообщества легален, а лента
-    фильтрует по `community_slug` — такой пользователь не увидел бы ничего.
+    фильтрует по `city_slug` — такой пользователь не увидел бы ничего.
     """
     row = (
         await session.execute(
             text(
                 "SELECT is_nullable, column_default "
                 "  FROM information_schema.columns "
-                " WHERE table_name = 'users' AND column_name = 'community_slug'"
+                " WHERE table_name = 'users' AND column_name = 'city_slug'"
             )
         )
     ).one_or_none()
-    assert row is not None, "колонка users.community_slug отсутствует"
+    assert row is not None, "колонка users.city_slug отсутствует"
     assert row.is_nullable == "NO", row
     assert row.column_default is None, f"дефолт не снят: {row.column_default!r}"
 
 
-async def test_community_slug_check_rejects_bad_forms(session: AsyncSession) -> None:
+async def test_city_slug_check_rejects_bad_forms(session: AsyncSession) -> None:
     """AC-01: CHECK `~ '^[a-z0-9_-]{3,64}$'` реально отбивает плохие формы.
 
     §18.1: проверка НАРУШЕНИЕМ. Три класса, каждый ломает свой участок
@@ -88,11 +88,11 @@ async def test_community_slug_check_rejects_bad_forms(session: AsyncSession) -> 
     """
     for bad in ("Tomsk", "tom sk", "ab"):
         with pytest.raises(IntegrityError):
-            await _insert_user(session, community_slug=bad)
+            await _insert_user(session, city_slug=bad)
         await session.rollback()
 
 
-async def test_community_slug_check_rejects_65_chars(session: AsyncSession) -> None:
+async def test_city_slug_check_rejects_65_chars(session: AsyncSession) -> None:
     """P-15 (CR 10.1): верхняя граница 64 — 65 символов отвергаются.
 
     Без этого шаблон `{3,}` без верхней границы остался бы зелёным, хотя
@@ -104,40 +104,40 @@ async def test_community_slug_check_rejects_65_chars(session: AsyncSession) -> N
     # сработает первым, зависит от плана. Перехватывается общий предок:
     # предмет теста — отказ, а не конкретный класс исключения драйвера.
     with pytest.raises((IntegrityError, DataError, DBAPIError)):
-        await _insert_user(session, community_slug="a" * 65)
+        await _insert_user(session, city_slug="a" * 65)
     await session.rollback()
 
 
-async def test_community_slug_check_accepts_exactly_64(session: AsyncSession) -> None:
+async def test_city_slug_check_accepts_exactly_64(session: AsyncSession) -> None:
     """P-15, P-19: ровно 64 символа — ПРОХОДЯТ (граница с обеих сторон).
 
     Пара к предыдущему тесту: шаблон `{3,63}` прошёл бы проверку на 65,
     но отверг бы легальное значение.
     """
-    await _insert_user(session, community_slug="b" * 64)
+    await _insert_user(session, city_slug="b" * 64)
     count = (
         await session.execute(
-            text("SELECT count(*) FROM users WHERE community_slug = :s"),
+            text("SELECT count(*) FROM users WHERE city_slug = :s"),
             {"s": "b" * 64},
         )
     ).scalar_one()
     assert count == 1
 
 
-async def test_community_slug_check_accepts_valid_form(session: AsyncSession) -> None:
+async def test_city_slug_check_accepts_valid_form(session: AsyncSession) -> None:
     """AC-01: положительная базовая линия (P-19) — валидный слаг ПРОХОДИТ.
 
-    Без этого теста `test_community_slug_check_rejects_bad_forms` был бы
+    Без этого теста `test_city_slug_check_rejects_bad_forms` был бы
     зелёным и при CHECK, отвергающем всё подряд.
     """
-    await _insert_user(session, community_slug="tomsk-2_a")
+    await _insert_user(session, city_slug="tomsk-2_a")
     count = (
-        await session.execute(text("SELECT count(*) FROM users WHERE community_slug = 'tomsk-2_a'"))
+        await session.execute(text("SELECT count(*) FROM users WHERE city_slug = 'tomsk-2_a'"))
     ).scalar_one()
     assert count == 1
 
 
-async def test_community_slug_constraint_name_matches_convention(session: AsyncSession) -> None:
+async def test_city_slug_constraint_name_matches_convention(session: AsyncSession) -> None:
     """AC-01, §18.7: имя ограничения по конвенции `ck_users_<name>`.
 
     Расхождение ломает `alembic check` и `downgrade`: миграция снимает
@@ -154,7 +154,7 @@ async def test_community_slug_constraint_name_matches_convention(session: AsyncS
             )
         ).all()
     }
-    assert "ck_users_community_slug" in names, sorted(names)
+    assert "ck_users_city_slug" in names, sorted(names)
 
 
 # --- AC-02: механика лайков удалена ----------------------------------------------
@@ -220,8 +220,8 @@ async def test_model_matches_migration(session: AsyncSession) -> None:
         ).all()
     }
 
-    assert "community_slug" in db_columns
-    assert "community_slug" in model_columns
+    assert "city_slug" in db_columns
+    assert "city_slug" in model_columns
     # Модель описывает ровно те колонки, что есть в схеме: иначе `alembic check`
     # покажет расхождение, а приложение упадёт на первом же запросе.
     assert model_columns == db_columns, {
@@ -236,7 +236,7 @@ async def test_model_matches_migration(session: AsyncSession) -> None:
 
 
 def test_migration_literal_matches_config() -> None:
-    """D-10.1-1, P-03: литерал `0032` совпадает с `Settings.default_community_slug`.
+    """D-10.1-1, P-03: литерал `0032` совпадает с `Settings.default_city_slug`.
 
     Миграция обязана хранить ЛИТЕРАЛ (историческая ревизия воспроизводима при
     смене конфига), но расхождение литерала с конфигом невидимо иначе: старые
@@ -254,12 +254,16 @@ def test_migration_literal_matches_config() -> None:
     )
     source = migration.read_text(encoding="utf-8")
 
+    # Стори 12.1: имя литерала в `0032` осталось историческим
+    # (`DEFAULT_COMMUNITY_SLUG`) — ревизия неизменяема, колонку переименовывает
+    # `0035`. Сверяется ЗНАЧЕНИЕ: старые строки и новые пользователи должны
+    # попасть в один город, и это не зависит от того, как назывался литерал.
     match = re.search(r'^DEFAULT_COMMUNITY_SLUG = "([^"]+)"$', source, re.M)
     assert match is not None, "литерал DEFAULT_COMMUNITY_SLUG в 0032 не найден"
 
-    assert match.group(1) == settings.default_community_slug, (
-        f"литерал миграции {match.group(1)!r} != default_community_slug "
-        f"{settings.default_community_slug!r}: старые строки и новые пользователи "
+    assert match.group(1) == settings.default_city_slug, (
+        f"литерал миграции {match.group(1)!r} != default_city_slug "
+        f"{settings.default_city_slug!r}: старые строки и новые пользователи "
         f"попадут в разные сообщества"
     )
 

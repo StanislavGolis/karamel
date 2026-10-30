@@ -94,7 +94,7 @@ export function ThemeToggle() {
                 "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring",
                 selected
                   ? "border-accent bg-accent text-accent-ink"
-                  : "border-border-input bg-surface-raised text-ink hover:bg-surface",
+                  : "border-border-input bg-surface-raised text-ink hover:bg-surface-hover",
               ].join(" ")}
             >
               {/* Иконка + текст обязательны (NFR57): статус не только цветом

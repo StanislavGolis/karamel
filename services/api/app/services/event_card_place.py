@@ -68,7 +68,7 @@ async def ensure_place_available(
     session: AsyncSession,
     *,
     place_uuid: uuid_lib.UUID,
-    community_slug: str,
+    city_slug: str,
     repository: PlaceRepository | None = None,
 ) -> None:
     """AC-04: единственная точка правила «место доступно для карточки».
@@ -88,7 +88,7 @@ async def ensure_place_available(
     """
     repo = repository if repository is not None else PlaceRepository(session)
     available = await repo.is_available_for_card(
-        place_uuid=place_uuid, community_slug=community_slug
+        place_uuid=place_uuid, city_slug=city_slug
     )
     if not available:
         raise PlaceNotAvailableError(place_uuid)

@@ -48,8 +48,8 @@ class _RaceSettings:
     ПОВЕДЕНИЕ лимита, а не текущее значение `.env` стенда.
     """
 
-    default_community_slug = COMMUNITY
-    community_slugs = (COMMUNITY,)
+    default_city_slug = COMMUNITY
+    city_slugs = (COMMUNITY,)
     card_default_decision_window_minutes = 2880
     card_content_stop_words = ("казино", "займ")
 
@@ -144,7 +144,7 @@ async def _insert_place(factory: Any) -> int:
     async with factory() as preparation:
         row = await preparation.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:name, 'cafe', 'пр. Ленина, 1', :slug, true) RETURNING id"
             ),
             {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": COMMUNITY},
@@ -169,7 +169,7 @@ async def _insert_card(
     values: dict[str, Any] = {
         "author_id": author_id,
         "place_id": place_id,
-        "community_slug": COMMUNITY,
+        "city_slug": COMMUNITY,
         "title": "Настольные игры",
         "category": "cafe",
         "starts_at": starts_at,
@@ -194,13 +194,14 @@ async def _insert_card(
         row = await preparation.execute(
             text(
                 "INSERT INTO event_cards "
-                "(author_id, place_id, community_slug, title, category, starts_at, "
+                "(author_id, place_id, city_slug, title, category, starts_at, "
                 " capacity, decision_window_minutes, expires_at, status, "
-                " verification_status, filled_count, published_at, rejection_reason) "
-                "VALUES (:author_id, :place_id, :community_slug, :title, :category, "
+                " verification_status, filled_count, published_at, rejection_reason,"
+                "kind, activity) "
+                "VALUES (:author_id, :place_id, :city_slug, :title, :category, "
                 " :starts_at, :capacity, :decision_window_minutes, :expires_at, "
                 " :status, :verification_status, :filled_count, :published_at, "
-                " :rejection_reason) "
+                " :rejection_reason, 'company', 'coffee') "
                 "RETURNING id, uuid"
             ),
             values,

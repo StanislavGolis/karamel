@@ -34,8 +34,8 @@ pytestmark = [
 ]
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 def _future(**delta: int) -> datetime:
@@ -79,10 +79,10 @@ async def _place(session: AsyncSession, *, slug: str | None = None) -> int:
     """Место и его внутренний `id` (нужен для FK карточки)."""
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id, uuid"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug or _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug or _city()},
     )
     mapping = row.mappings().one()
     return int(mapping["id"])
@@ -108,16 +108,17 @@ async def _insert_card(
     expires = expires_at or (starts - timedelta(hours=1))
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, :title, NULL, :category, :starts, :capacity, 60, "
-            ":expires, :status, :filled, :verification, :published_at) RETURNING uuid"
+            ":expires, :status, :filled, :verification, :published_at,"
+            "'company', 'coffee') RETURNING uuid"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": slug or _community(),
+            "slug": slug or _city(),
             "title": title,
             "category": category,
             "starts": starts,
@@ -146,9 +147,10 @@ async def test_feed_returns_only_published_and_full_future(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-01: только `published`/`full`, только будущие, только своё сообщество.
+    П1 (FR79, видимость): в ленту попадают только `published`/`full` и только будущие.
 
     Краснеет от снятия любого из трёх условий билдера: `status IN`, `starts_at >=
-    now`, `community_slug =`. Каждая «лишняя» карточка здесь — отдельное
+    now`, `city_slug =`. Каждая «лишняя» карточка здесь — отдельное
     нарушение, а не вариант одного.
     """
     user, token = await _new_user(session)
@@ -446,6 +448,15 @@ async def test_get_card_by_uuid_returns_full_form(
         "title",
         "description",
         "category",
+        # Стори 12.4 (AC-7, FR117/FR118): тип и активность — публичные поля
+        # контракта, а не внутренние адреса.
+        "kind",
+        "activity",
+        # Стори 12.6 (AC-2a, FR119): рамки аудитории видны ДО подачи —
+        # публичные поля контракта.
+        "gender_filter",
+        "age_min",
+        "age_max",
         "starts_at",
         "expires_at",
         # Стори 5б.1 (AC-04, NFR14): серверный якорь отсчёта окна.
@@ -459,18 +470,23 @@ async def test_get_card_by_uuid_returns_full_form(
         # Публичное поле контракта; у постороннего всегда `false`, поэтому
         # оно не различает проигравшего и наблюдателя (AC-03).
         "viewer_participates",
+        # Стори 11.5 (AC-2, AC-5, FR82): «моя заявка» и её `uuid`. Публичные
+        # поля контракта: у постороннего `false`/`null`, поэтому состав
+        # заявившихся ими не раскрывается (FR81).
+        "viewer_requested",
+        "viewer_request_uuid",
     }
     assert set(body["place"]) == {"uuid", "name", "address_text"}
     assert set(body["author"]) == {"uuid", "name", "age"}
     assert body["chat_uuid"] is None
 
 
-async def test_get_card_from_other_community_is_404(
+async def test_get_card_from_other_city_is_404(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-02 (ADR-13): карточка другого сообщества — `404`, не `403`.
 
-    Краснеет от снятия среза `community_slug` в билдере: участник получал бы
+    Краснеет от снятия среза `city_slug` в билдере: участник получал бы
     карточку чужого города по прямому `uuid`, а `403` раскрыл бы её
     существование.
     """

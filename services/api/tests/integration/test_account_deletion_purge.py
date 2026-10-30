@@ -45,7 +45,7 @@ async def _user(session: AsyncSession, *, expired: bool = True) -> Any:
     phone = f"+7908{uuid_lib.uuid4().int % 10**7:07d}"
     row = await session.execute(
         text(
-            "INSERT INTO users (provider, provider_user_id, phone, community_slug, "
+            "INSERT INTO users (provider, provider_user_id, phone, city_slug, "
             "role, status, gender, age_confirmed, consent_given_at, deletion_requested_at) "
             "VALUES ('phone', :p, :p, 'tomsk', 'user', 'active', 'female', true, now(), :d) "
             "RETURNING id, uuid"
@@ -64,7 +64,7 @@ async def _user(session: AsyncSession, *, expired: bool = True) -> Any:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', 'tomsk', true) RETURNING id"
         ),
         {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -98,11 +98,11 @@ async def _card(session: AsyncSession, *, author_id: int, place_id: int) -> int:
     moment = datetime.now(UTC) - timedelta(hours=1)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:a, :p, 'tomsk', 'Встреча', NULL, 'cafe', :st, 2, 60, :e, 'full', 2, "
-            "'approved', :pub) RETURNING id"
+            "'approved', :pub, 'company', 'coffee') RETURNING id"
         ),
         {
             "a": author_id,
@@ -226,7 +226,7 @@ async def _other_user(session: AsyncSession) -> int:
     phone = f"+7909{uuid_lib.uuid4().int % 10**7:07d}"
     row = await session.execute(
         text(
-            "INSERT INTO users (provider, provider_user_id, phone, community_slug, "
+            "INSERT INTO users (provider, provider_user_id, phone, city_slug, "
             "role, status, gender, age_confirmed, consent_given_at, deletion_requested_at) "
             "VALUES ('phone', :p, :p, 'tomsk', 'user', 'active', 'male', true, now(), NULL) "
             "RETURNING id"
@@ -255,11 +255,11 @@ async def _seed_third_party_refs(session: AsyncSession, *, subject_id: int) -> d
     moment = datetime.now(UTC) + timedelta(hours=2)
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, verified_at, verified_by) "
+            "filled_count, verification_status, verified_at, verified_by, kind, activity) "
             "VALUES (:a, :p, 'tomsk', 'Чужая встреча', NULL, 'cafe', :st, 2, 60, :e, "
-            "'draft', 0, 'approved', now(), :v) RETURNING id"
+            "'draft', 0, 'approved', now(), :v, 'company', 'coffee') RETURNING id"
         ),
         {
             "a": other_id,

@@ -50,9 +50,22 @@ pytestmark = [
 
 _URL = "/api/v1/metrics"
 
+#: Момент, от которого строятся ВСЕ окна файла (стори 11.7, Task 2.1).
+#:
+#: **Почему не абсолютные даты.** До 11.7 здесь стояло `FROM = 2026-05-01`,
+#: `TO = 2026-05-15`. С нижней границей окна (`now − 6 календарных месяцев`)
+#: весь файл с `2026-11-01` начал бы получать `422 period_too_old` вместо
+#: `200` — без единой правки кода. Фикс, зелёный сегодня и красный в
+#: понедельник, смёржить нельзя: это класс P-24 («замер без момента —
+#: догадка»).
+#:
+#: Усечение до секунды — чтобы `isoformat()` не нёс микросекунды в query:
+#: на них не завязано ни одно утверждение, а читаемость адреса теряется.
+NOW = datetime.now(UTC).replace(microsecond=0)
+
 #: Начало окна: метки времени задаются данными, а не `now()` (P-19).
-FROM = datetime(2026, 5, 1, tzinfo=UTC)
-TO = datetime(2026, 5, 15, tzinfo=UTC)
+TO = NOW
+FROM = TO - timedelta(days=14)
 
 
 @pytest.fixture
@@ -65,10 +78,10 @@ async def _make_place(session: AsyncSession) -> int:
     """Место карточки: FK обязателен."""
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     return int(row.scalar_one())
 
@@ -96,7 +109,7 @@ async def _insert_card(
     filled_count: int = 0,
     capacity: int = 2,
     status: str = "published",
-    community_slug: str | None = None,
+    city_slug: str | None = None,
 ) -> int:
     """Карточка с ЯВНЫМ `created_at` и `filled_count`.
 
@@ -106,7 +119,7 @@ async def _insert_card(
     Нарушение любого из них дало бы `IntegrityError` в фикстуре, и тест упал
     бы не на измеряемом предикате (P-21).
     """
-    slug = community_slug if community_slug is not None else settings.default_community_slug
+    slug = city_slug if city_slug is not None else settings.default_city_slug
     place = place_id if place_id is not None else await _make_place(session)
     starts = created_at + timedelta(hours=2)
     expires = created_at + timedelta(hours=1)
@@ -115,11 +128,11 @@ async def _insert_card(
         status = "full"
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at, created_at) "
+            "filled_count, verification_status, published_at, created_at, kind, activity) "
             "VALUES (:a, :p, :s, :t, NULL, 'cafe', :st, :cap, 60, :e, :status, :filled, "
-            "'approved', :pub, :created) RETURNING id"
+            "'approved', :pub, :created, 'company', 'coffee') RETURNING id"
         ),
         {
             "a": author_id,
@@ -257,10 +270,10 @@ async def test_nfr1_and_nfr2_match_reference_sql(
                 "SELECT count(*) FILTER (WHERE filled_count >= 1), "
                 "       COALESCE(sum(filled_count), 0), count(*) "
                 "  FROM event_cards "
-                " WHERE community_slug = :slug AND created_at >= :f AND created_at < :t "
+                " WHERE city_slug = :slug AND created_at >= :f AND created_at < :t "
                 "   AND status IN ('published','full','closed','finished')"
             ),
-            {"slug": settings.default_community_slug, "f": FROM, "t": TO},
+            {"slug": settings.default_city_slug, "f": FROM, "t": TO},
         )
     ).one()
     assembled_ref, joined_ref, total_ref = int(reference[0]), int(reference[1]), int(reference[2])
@@ -312,11 +325,11 @@ async def test_nfr4_matches_reference_sql(client: AsyncClient, session: AsyncSes
             text(
                 "SELECT count(*) FILTER (WHERE cards >= 2), count(*) FROM ("
                 "  SELECT author_id, count(*) AS cards FROM event_cards"
-                "   WHERE community_slug = :slug AND created_at >= :f AND created_at < :t"
+                "   WHERE city_slug = :slug AND created_at >= :f AND created_at < :t"
                 "     AND status IN ('published','full','closed','finished')"
                 "   GROUP BY author_id) t"
             ),
-            {"slug": settings.default_community_slug, "f": FROM, "t": TO},
+            {"slug": settings.default_city_slug, "f": FROM, "t": TO},
         )
     ).one()
     assert (int(reference[0]), int(reference[1])) == (1, 3)
@@ -398,16 +411,16 @@ async def test_nfr3_matches_reference_sql(client: AsyncClient, session: AsyncSes
             text(
                 "WITH w AS (SELECT DISTINCT a.card_id FROM attendance a "
                 "  JOIN event_cards e ON e.id = a.card_id "
-                " WHERE e.community_slug = :slug AND e.created_at >= :f AND e.created_at < :t "
+                " WHERE e.city_slug = :slug AND e.created_at >= :f AND e.created_at < :t "
                 "   AND e.status IN ('published','full','closed','finished')), "
                 "c AS (SELECT a.card_id FROM attendance a "
                 "  JOIN event_cards e ON e.id = a.card_id "
-                " WHERE e.community_slug = :slug AND e.created_at >= :f AND e.created_at < :t "
+                " WHERE e.city_slug = :slug AND e.created_at >= :f AND e.created_at < :t "
                 "   AND e.status IN ('published','full','closed','finished') "
                 " GROUP BY a.card_id HAVING bool_and(a.status = 'confirmed')) "
                 "SELECT (SELECT count(*) FROM c), (SELECT count(*) FROM w)"
             ),
-            {"slug": settings.default_community_slug, "f": FROM, "t": TO},
+            {"slug": settings.default_city_slug, "f": FROM, "t": TO},
         )
     ).one()
     assert (int(reference[0]), int(reference[1])) == (1, 3)
@@ -788,10 +801,56 @@ async def test_invalid_period_when_from_after_to(
     assert response.json() == {"code": "invalid_period"}
 
 
-async def test_period_too_long_over_365_days(client: AsyncClient, session: AsyncSession) -> None:
-    """AC-01.4: окно 366 дней → `422 period_too_long`."""
+async def test_too_old_window_never_reaches_the_database(
+    client: AsyncClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-1a (стори 11.7): запрос за нижней границей НЕ доходит до `build_metrics`.
+
+    **Зачем отдельный тест.** Формы ответа `422 period_too_old` мало: проверка
+    могла стоять ПОСЛЕ расчёта, и тогда отказ означал бы «сначала посчитали
+    четыре метрики, потом отказали» — лишние запросы к БД и возможный `500`
+    на битых данных вместо честного `422`. CR 11.7 показал, что без этого
+    теста мутация «перенести гард после `build_metrics`» ВЫЖИВАЛА: все
+    проверки смотрели только на код ответа.
+
+    **Почему подмена модуля, а не шпион на сессии.** Утверждение — про
+    ПОРЯДОК внутри роутера, и ловится оно только на самом вызове сервиса.
+    Подменённая функция бросает `AssertionError`, который `pytest` не
+    перехватывает как `HTTPException`: если гард стоит после расчёта, тест
+    падает на подмене, а не зеленеет на `422`.
+    """
     _, token = await make_user(session, role="moderator")
-    response = await _get(client, token, period_from=TO - timedelta(days=366), period_to=TO)
+
+    async def _forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("build_metrics вызван до проверки нижней границы окна (AC-1a)")
+
+    monkeypatch.setattr("app.api.v1.metrics.build_metrics", _forbidden)
+
+    response = await _get(
+        client,
+        token,
+        period_from=NOW - timedelta(days=240),
+        period_to=NOW,
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json() == {"code": "period_too_old"}
+
+
+async def test_period_too_long_over_365_days(client: AsyncClient, session: AsyncSession) -> None:
+    """AC-01.4: окно 366 дней → `422 period_too_long`.
+
+    Стори 11.7 (Task 2.3): `to` НЕ равен «сегодня». С нижней границей окна
+    (`now − 6 мес`) старое `from = TO − 366 сут` отбивалось бы раньше — как
+    `period_too_old`, и тест длины молча проверял бы не то правило. Окно
+    строится в будущем: контракт `format: date-time` его не запрещает, а
+    `period_too_long` — про ДЛИНУ, независимо от того, где окно лежит.
+    """
+    _, token = await make_user(session, role="moderator")
+    period_from = NOW - timedelta(days=100)
+    response = await _get(
+        client, token, period_from=period_from, period_to=period_from + timedelta(days=366)
+    )
     assert response.status_code == 422
     assert response.json() == {"code": "period_too_long"}
 
@@ -799,9 +858,19 @@ async def test_period_too_long_over_365_days(client: AsyncClient, session: Async
 async def test_period_exactly_365_days_is_allowed(
     client: AsyncClient, session: AsyncSession
 ) -> None:
-    """AC-01.4, граница: ровно 365 дней — легально (`>` , не `>=`)."""
+    """AC-01.4, граница: ровно 365 дней — легально (`>`, не `>=`).
+
+    Стори 11.7 (Task 2.2): 365 дней ЦЕЛИКОМ В ПРОШЛОМ больше невозможны.
+    `from ≤ now − 6 мес` и `to − from = 365 сут` одновременно требуют
+    `to ≥ now + 6 мес`, то есть `to` в будущем. Это осознанный размен
+    `AC-1 × AC-3` (см. шапку стори), а не дефект: замок на границу `>`
+    сохраняется, но проверяется окном с будущим `to`.
+    """
     _, token = await make_user(session, role="moderator")
-    response = await _get(client, token, period_from=TO - timedelta(days=365), period_to=TO)
+    period_from = NOW - timedelta(days=100)
+    response = await _get(
+        client, token, period_from=period_from, period_to=period_from + timedelta(days=365)
+    )
     assert response.status_code == 200, response.text
 
 
@@ -913,11 +982,15 @@ async def test_both_naive_is_422(client: AsyncClient, session: AsyncSession) -> 
 async def test_both_aware_is_200(client: AsyncClient, session: AsyncSession) -> None:
     """P-1, контроль: оба с поясом → `200`. Иначе фикс отбивал бы валидный вход."""
     _, token = await make_user(session, role="moderator")
+    # CR 11.7: окно строится от `NOW`, а не от литерала `2026-05-01`.
+    # Литерал проходил сегодня и начал бы отбиваться `422 period_too_old`
+    # с 2026-11-02 — тот же класс гнили, что чинила Task 2.1 в остальном
+    # файле (P-24: замер без момента — догадка).
     response = await _raw_get(
         client,
         token,
-        raw_from="2026-05-01T00:00:00+00:00",
-        raw_to="2026-05-15T00:00:00+00:00",
+        raw_from=FROM.isoformat(),
+        raw_to=TO.isoformat(),
     )
     assert response.status_code == 200, response.text
     assert len(response.json()["metrics"]) == 4
@@ -957,11 +1030,14 @@ async def test_period_with_non_utc_offset_is_converted_to_utc(
     Смещение сохраняется в контракте, но окно считается в UTC.
     """
     _, token = await make_user(session, role="moderator")
+    # CR 11.7: та же гниль, что в `test_both_aware_is_200`. Смещение `+07:00`
+    # сохраняется (оно и проверяется), но сама дата — от `NOW`.
+    offset = timedelta(hours=7)
     response = await _raw_get(
         client,
         token,
-        raw_from="2026-05-01T07:00:00+07:00",
-        raw_to="2026-05-15T07:00:00+07:00",
+        raw_from=(FROM + offset).isoformat(),
+        raw_to=(TO + offset).isoformat(),
     )
     assert response.status_code == 200, response.text
     assert len(response.json()["metrics"]) == 4

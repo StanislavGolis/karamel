@@ -54,8 +54,8 @@ CARD_UUID = uuid_lib.UUID("44444444-4444-4444-8444-444444444444")
 class _Settings:
     """Минимум настроек сервиса: поля протокола `CardSettings` без `.env`."""
 
-    default_community_slug = "tomsk"
-    community_slugs = ("tomsk",)
+    default_city_slug = "tomsk"
+    city_slugs = ("tomsk",)
     card_default_decision_window_minutes = 2880
     card_content_stop_words = ("казино", "займ")
     card_active_limit = 2
@@ -185,7 +185,7 @@ def _card(**overrides: Any) -> EventCard:
         "id": 1,
         "author_id": 7,
         "place_id": 42,
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
         "title": "Настольные игры",
         "description": None,
         "category": "cafe",

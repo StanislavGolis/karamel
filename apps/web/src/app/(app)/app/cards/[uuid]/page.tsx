@@ -18,6 +18,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { AuthorProfile, loadCardAuthorProfile } from "@/components/cards/author-profile";
 import { CardActions } from "@/components/cards/card-actions";
 import { EventCard, type FeedCard } from "@/components/cards/event-card";
 import { JoinActions } from "@/components/cards/join-actions";
@@ -96,7 +97,7 @@ export default async function CardPage({ params }: { params: Promise<{ uuid: str
         </p>
         <a
           href="/app"
-          className="min-h-11 self-start rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface"
+          className="min-h-11 self-start rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface-hover"
         >
           К ленте
         </a>
@@ -129,12 +130,33 @@ export default async function CardPage({ params }: { params: Promise<{ uuid: str
   // карточку автор видит как обычную, а управление живёт отдельным блоком.
   const isAuthor = result.user.uuid === card.author.uuid;
 
+  // Task 5.2 стори 11.5: сервер отдаёт `viewer_requested` и
+  // `viewer_request_uuid` одной строкой, поэтому расхождение — дефект
+  // контракта, а не состояние. Предупреждение только в разработке:
+  // пользователю нечего делать с этой информацией, а кнопка отмены просто
+  // не показывается (отменять нечего).
+  if (process.env.NODE_ENV !== "production" && card.viewer_requested && !card.viewer_request_uuid) {
+    console.warn(
+      "[cards] viewer_requested без viewer_request_uuid: кнопка отмены заявки не показана",
+      card.uuid,
+    );
+  }
+
   return (
     <main className="flex flex-col gap-4">
       <a href="/app" className="min-h-11 self-start text-sm font-medium text-accent">
         ← К ленте
       </a>
       <EventCard card={card} isOwn={isOwnDraft} />
+      {/* AC-6 стори 12.7 (FR120, UX §780-802): анкета автора — в контексте
+          карточки, единственная точка чтения чужой анкеты (ADR-22). Блок
+          рисуется ВСЕГДА, включая архив: на архивной карточке он показывает
+          текст UX §919 «Анкета автора больше не показывается» — пустое место
+          читалось бы как сбой загрузки (P-26, R1).
+
+          Запрос уходит под cookie зрителя; `404` API решает, что показать,
+          — клиент не решает вопрос доступа (ADR-13). */}
+      <AuthorProfile state={await loadCardAuthorProfile(uuid, cookieHeader || null)} />
       {/* AC-09 стори 5б.2 (FR104, X-5a.6-2): действия участника — ТОЛЬКО
           не-автору. Автор не присоединяется к своей компании, и кнопка
           «Отменить участие» ему не нужна (он распускает карточку через
@@ -151,6 +173,13 @@ export default async function CardPage({ params }: { params: Promise<{ uuid: str
               uuid={card.uuid}
               participates={card.viewer_participates ?? false}
               joinable={card.status === "published"}
+              // AC-1, AC-7 стори 11.5: вместимость выбирает режим действия —
+              // 1 → форма заявки с сообщением, 2..6 → панель присоединения.
+              capacity={card.capacity}
+              // AC-2, AC-5: «моя заявка» и её `uuid` приходят из контракта 11.5.
+              // Без них кнопка «Отменить заявку» некуда бы отправляла запрос.
+              requested={card.viewer_requested ?? false}
+              requestUuid={card.viewer_request_uuid ?? null}
             />
           )
         : null}

@@ -5,6 +5,12 @@
   "tokenSource": "src/app/globals.css",
   "note": "Волна 2: 9 примитивов переведены в status=system. Каждый переписан с shadcn-словаря (bg-primary/text-muted-foreground/dark:*) на наши --color-* токены по §6.5 п.2 и §17.4 (тема меняет значения переменных, а не классы). Остальные компоненты остаются legacy до волн 3-5 (§15.2).",
   "components": {
+    "AuthorProfile": {
+      "path": "cards/author-profile.tsx",
+      "status": "system",
+      "wave": 3,
+      "passport": 6
+    },
     "Avatar": {
       "path": "ui/avatar.tsx",
       "status": "system",
@@ -65,8 +71,8 @@
       "wave": 0,
       "passport": 0
     },
-    "CountdownBadge": {
-      "path": "cards/countdown-badge.tsx",
+    "DeadlineNotice": {
+      "path": "cards/deadline-notice.tsx",
       "status": "system",
       "wave": 3,
       "passport": 6
@@ -231,6 +237,12 @@
       "path": "ui/toast.tsx",
       "status": "system",
       "wave": 2,
+      "passport": 6
+    },
+    "JoinRequestForm": {
+      "path": "cards/join-request-form.tsx",
+      "status": "system",
+      "wave": 3,
       "passport": 6
     }
   }

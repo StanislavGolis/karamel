@@ -97,25 +97,26 @@ async def make_card(
     """Карточка события в состоянии `full` (стабильная форма для числа SQL)."""
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     place_id = int(place.scalar_one())
     moment = starts_at if starts_at is not None else datetime.now(UTC) - timedelta(hours=1)
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
-            "VALUES (:a, :p, :s, :t, NULL, 'cafe', :st, 2, 60, :e, 'full', 2, 'approved', :pub) "
+            "filled_count, verification_status, published_at, kind, activity) "
+            "VALUES (:a, :p, :s, :t, NULL, 'cafe', :st, 2, 60, :e, 'full', 2, 'approved', :pub,"
+            "'company', 'coffee') "
             "RETURNING uuid, id"
         ),
         {
             "a": author_id,
             "p": place_id,
-            "s": settings.default_community_slug,
+            "s": settings.default_city_slug,
             "t": title,
             "st": moment,
             "e": moment - timedelta(hours=1),

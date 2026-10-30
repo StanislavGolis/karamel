@@ -36,6 +36,16 @@ const API_TIMEOUT_MS = 5_000;
 type MetricsState =
   | { kind: "ok"; data: PilotMetricsView }
   | { kind: "forbidden" }
+  /**
+   * AC-8 стори 11.7: окно начинается раньше срока хранения (шесть месяцев).
+   *
+   * Отдельное состояние, а НЕ `unavailable`: сервис работает, база цела,
+   * числа за такой период пересчитать дважды одинаково нельзя — ретенция
+   * удалила оттуда `attendance`. Слить этот ответ с «сервис недоступен»
+   * значило бы отправить администратора обновлять страницу вместо того,
+   * чтобы выбрать доступный период.
+   */
+  | { kind: "tooOld" }
   | { kind: "unavailable" };
 
 /**
@@ -58,6 +68,15 @@ async function loadMetrics(cookieHeader: string, period: MetricsPeriod): Promise
 
     // 403 — отказ по роли, а не сбой сервиса: разные действия читателя.
     if (response.status === 403) return { kind: "forbidden" };
+    // 422 `period_too_old` — не сбой, а недоступный период (AC-8, стори 11.7).
+    // Тело читается ДО общей ветки `!ok`: код ошибки отличает «выбрана старая
+    // дата» от «сервис сломался», и по статусу эти случаи неразличимы
+    // (`422` бывает и у `invalid_period`, который сюда попадать не должен).
+    if (response.status === 422) {
+      const failure = (await response.json().catch(() => null)) as { code?: unknown } | null;
+      if (failure?.code === "period_too_old") return { kind: "tooOld" };
+      return { kind: "unavailable" };
+    }
     if (!response.ok) return { kind: "unavailable" };
 
     const payload = (await response.json()) as Partial<PilotMetricsView>;
@@ -106,6 +125,20 @@ export default async function PilotMetricsPage({
         <h1 className="text-2xl font-semibold">Метрики пилота</h1>
         <p className="text-base">
           Недостаточно прав: метрики пилота доступны только модератору.
+        </p>
+      </main>
+    );
+  }
+
+  if (state.kind === "tooOld") {
+    return (
+      <main className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold">Метрики пилота</h1>
+        {/* AC-8: сообщение говорит, ЧТО сделать, и не притворяется сбоем. */}
+        <p className="text-base leading-relaxed">
+          Начало окна старше 6 месяцев: метрики за такой период больше не считаются —
+          данные явки за пределами срока хранения удалены. Выберите начало окна
+          не раньше последних шести месяцев.
         </p>
       </main>
     );

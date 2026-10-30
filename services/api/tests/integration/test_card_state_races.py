@@ -46,8 +46,8 @@ COMMUNITY = "tomsk"
 class _Settings:
     """Минимум настроек сервиса: протокол `CardSettings` без чтения `.env`."""
 
-    default_community_slug = COMMUNITY
-    community_slugs = (COMMUNITY,)
+    default_city_slug = COMMUNITY
+    city_slugs = (COMMUNITY,)
     card_default_decision_window_minutes = 2880
     card_content_stop_words = ("казино", "займ")
     card_active_limit = 2
@@ -120,7 +120,7 @@ async def _seed_card(
         )
         place_row = await session.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
             ),
             {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": COMMUNITY},
@@ -129,11 +129,12 @@ async def _seed_card(
         starts = starts_at or (datetime.now(UTC) + timedelta(days=3))
         card_row = await session.execute(
             text(
-                "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+                "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
                 "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-                "filled_count, verification_status, published_at) "
+                "filled_count, verification_status, published_at, kind, activity) "
                 "VALUES (:author, :place, :slug, 'Гонка', NULL, 'cafe', :starts, 3, 60, "
-                ":expires, :status, 0, 'approved', :published_at) RETURNING uuid"
+                ":expires, :status, 0, 'approved', :published_at,"
+                "'company', 'coffee') RETURNING uuid"
             ),
             {
                 "author": user.id,

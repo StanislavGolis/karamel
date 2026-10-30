@@ -14,7 +14,7 @@ AC-03 (FR70): при `capacity = 1` окно решения ОБЯЗАТЕЛЬН
 (`Settings.card_default_decision_window_minutes`, OQ-1: 2880 = 48 ч).
 
 Серверные поля (`status`, `verification_status`, `filled_count`,
-`community_slug`, `author_id`, `expires_at`, `uuid`) в схему НЕ входят:
+`city_slug`, `author_id`, `expires_at`, `uuid`) в схему НЕ входят:
 их задаёт сервер, а не клиент. `extra="forbid"` превращает попытку
 их передать в `422`, а не в молчаливый выброс — иначе клиент считал бы,
 что опубликовал карточку, а она осталась черновиком.
@@ -30,7 +30,15 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models.enums import CardVerificationStatus, EventCardStatus, PlaceCategory
+from app.models.enums import (
+    ACTIVITY_INPUT_VALUES,
+    Activity,
+    CardKind,
+    CardVerificationStatus,
+    EventCardStatus,
+    Gender,
+    PlaceCategory,
+)
 from app.models.event_card import (
     CARD_MAX_CAPACITY,
     CARD_MAX_DECISION_WINDOW_MINUTES,
@@ -38,6 +46,7 @@ from app.models.event_card import (
     CARD_MIN_DECISION_WINDOW_MINUTES,
     CARD_REQUEST_MODE_CAPACITY,
 )
+from app.services.age_service import AGE_MAX, AGE_MIN
 from app.services.profile_normalize import normalize_bio, normalize_text
 
 # AC-01: пределы совпадают с шириной колонок `event_cards`. Проверка на схеме,
@@ -45,6 +54,30 @@ from app.services.profile_normalize import normalize_bio, normalize_text
 # (`500`) на валидном для формы вводе.
 TITLE_MAX_LENGTH = 100
 DESCRIPTION_MAX_LENGTH = 2000
+
+
+def reject_legacy_activity(value: object) -> object:
+    """AC-3 стори 12.4 (FR118): легаси `other` на вход не принимается.
+
+    `Activity.OTHER` существует в БД (бэкфилл миграции `0037`) и в CHECK
+    модели, но автор не может его выбрать: `ACTIVITY_INPUT_VALUES` содержит
+    ровно шесть значений FR118. Без этой проверки `other` стал бы седьмой
+    активностью через API, и «неизвестная активность» превратилась бы
+    в выбираемый смысл встречи.
+
+    Живёт функцией, а не двумя копиями валидаторов: `EventCardCreate` и
+    `EventCardUpdate` — два входа в одно поле, и разошедшиеся копии дали бы
+    дыру через `PATCH` (класс `W-11.5-c`).
+
+    `object`, а не `Activity`: в `mode="before"` Pydantic отдаёт сырое
+    значение (в том числе `None` при «не передан»), и подмена типа сломала
+    бы собственные проверки Pydantic.
+    """
+    if value is None:
+        return value
+    if str(value) not in {str(item) for item in ACTIVITY_INPUT_VALUES}:
+        raise ValueError("activity_other_reserved")
+    return value
 
 
 def _normalize(value: object) -> object:
@@ -77,7 +110,26 @@ class EventCardCreate(BaseModel):
     place_uuid: uuid_lib.UUID
     # AC-02, ADR-16: значение с зоной, конвертация ниже.
     starts_at: datetime
-    # AC-01, FR70: 1..6.
+    # AC-03 стори 12.4 (FR117, ADR-20): тип встречи выбирается явно и
+    # обязательно. `CardKind`, а не `str`: мусор отбивает Pydantic (`422`),
+    # а не CHECK в БД (`500`).
+    kind: CardKind
+    # AC-03 стори 12.4 (FR118): активность из белого списка FR118.
+    # Валидатор `_reject_legacy_activity` ниже запрещает легаси `other`.
+    activity: Activity
+    # AC-2 стори 12.6 (FR119, ADR-19): рамки аудитории — МЯГКИЙ фильтр.
+    # Все три необязательны: карточка без рамок законна («ищу любого»).
+    #
+    # `Gender`, а не `str`: мусор отбивает Pydantic (`422`), а не CHECK в БД
+    # (`500`). Границы 18..99 — те же `AGE_MIN`/`AGE_MAX`, что у профиля
+    # (`age_service`): рамка «ищу от 17» отсекла бы всех, кто вообще может
+    # зарегистрироваться, и выглядела бы как рабочая настройка.
+    gender_filter: Gender | None = None
+    age_min: int | None = Field(default=None, ge=AGE_MIN, le=AGE_MAX)
+    age_max: int | None = Field(default=None, ge=AGE_MIN, le=AGE_MAX)
+    # AC-01, FR70: 1..6. Обязательное: `W-11.5-c` — умолчание `2` уводило бы
+    # забытое поле в открытый набор, и пользователь `capacity=1` не смог бы
+    # подать заявку. Тест-замок: `test_card_kind_activity_schemas.py`.
     capacity: int = Field(ge=CARD_MIN_CAPACITY, le=CARD_MAX_CAPACITY)
     # AC-01, FR79: окно решения в минутах; для режима заявок обязательно.
     decision_window_minutes: int | None = Field(
@@ -85,6 +137,12 @@ class EventCardCreate(BaseModel):
         ge=CARD_MIN_DECISION_WINDOW_MINUTES,
         le=CARD_MAX_DECISION_WINDOW_MINUTES,
     )
+
+    @field_validator("activity", mode="before")
+    @classmethod
+    def _no_legacy_activity(cls, value: object) -> object:
+        """AC-3 стори 12.4: `other` — легаси БД, не выбор автора."""
+        return reject_legacy_activity(value)
 
     @field_validator("title", mode="before")
     @classmethod
@@ -148,6 +206,24 @@ class EventCardCreate(BaseModel):
                 "например 2026-11-01T19:00:00+07:00"
             )
         return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def _reject_inverted_age_range(self) -> EventCardCreate:
+        """AC-6.4 стори 12.6: `age_min > age_max` — `422`, а не `500` из БД.
+
+        Без этой проверки перевёрнутая пара доходила бы до CHECK
+        `ck_event_cards_age_range` и превращалась в `IntegrityError` → `500`
+        (класс дефекта, найденный в 12.5: `CardStartsAtTooFarError` ловился
+        в роутере, но ветки не было). Pydantic отдаёт `422` с машинным кодом
+        `age_range_invalid` — клиент показывает текст у поля, а не «ошибка
+        сервера».
+
+        Проверка только когда заданы ОБЕ границы: полуоткрытые пары легальны
+        (AC-1a), и `age_min = 30, age_max = None` — не ошибка.
+        """
+        if self.age_min is not None and self.age_max is not None and self.age_min > self.age_max:
+            raise ValueError("age_range_invalid")
+        return self
 
     @model_validator(mode="after")
     def _require_decision_window_for_request_mode(self) -> EventCardCreate:
@@ -233,7 +309,7 @@ class EventCardUpdate(BaseModel):
     (валидатор `_strip_description` выше).
 
     Серверных полей здесь НЕТ (`status`, `verification_status`, `filled_count`,
-    `community_slug`, `author_id`, `expires_at`, `uuid`): их задаёт сервер.
+    `city_slug`, `author_id`, `expires_at`, `uuid`): их задаёт сервер.
     `extra="forbid"` превращает попытку передать их в `422`, а не в молчаливый
     выброс — иначе клиент считал бы, что опубликовал карточку.
 
@@ -248,12 +324,42 @@ class EventCardUpdate(BaseModel):
     category: PlaceCategory | None = None
     place_uuid: uuid_lib.UUID | None = None
     starts_at: datetime | None = None
+    # AC-3 стори 12.4: тип и активность меняются до публикации.
+    # `| None` = «не передан, не трогать» (общая семантика PATCH).
+    kind: CardKind | None = None
+    activity: Activity | None = None
+    # AC-2 стори 12.6: рамки аудитории. `| None = None` — «не передано, не
+    # трогать»: снять рамку = передать `null` явно, и PATCH-семантика это
+    # различает через `model_fields_set` в сервисе.
+    gender_filter: Gender | None = None
+    age_min: int | None = Field(default=None, ge=AGE_MIN, le=AGE_MAX)
+    age_max: int | None = Field(default=None, ge=AGE_MIN, le=AGE_MAX)
     capacity: int | None = Field(default=None, ge=CARD_MIN_CAPACITY, le=CARD_MAX_CAPACITY)
     decision_window_minutes: int | None = Field(
         default=None,
         ge=CARD_MIN_DECISION_WINDOW_MINUTES,
         le=CARD_MAX_DECISION_WINDOW_MINUTES,
     )
+
+    @field_validator("activity", mode="before")
+    @classmethod
+    def _no_legacy_activity(cls, value: object) -> object:
+        """AC-3 стори 12.4: `PATCH` — второй вход, запрет `other` тот же."""
+        return reject_legacy_activity(value)
+
+    @model_validator(mode="after")
+    def _reject_inverted_age_range(self) -> EventCardUpdate:
+        """AC-6.4 стори 12.6: перевёрнутая пара — `422`, а не `500` из CHECK.
+
+        Проверяется только когда ОБЕ границы переданы явно: `PATCH {"age_min":
+        40}` без `age_max` может оказаться перевёрнутым относительно текущего
+        значения в БД, но это решает сервис на смеси payload и строки —
+        схеме строка недоступна. Здесь отбивается самоочевидный случай, когда
+        оба значения пришли одним запросом.
+        """
+        if self.age_min is not None and self.age_max is not None and self.age_min > self.age_max:
+            raise ValueError("age_range_invalid")
+        return self
 
     @field_validator("title", mode="before")
     @classmethod
@@ -334,6 +440,46 @@ class EventCardAuthor(BaseModel):
     age: int | None = None
 
 
+class EventCardAuthorProfile(BaseModel):
+    """AC-2, AC-4, AC-5 стори 12.7 (FR120, П11): витрина анкеты автора карточки.
+
+    ЕДИНСТВЕННАЯ точка чтения чужой анкеты (D-12.7-1): постоянной витрины
+    `/profiles/{uuid}` нет намеренно (ADR-22), а `GET /cards/{uuid}` на
+    архиве отдаёт `200` (FR73, замок `test_cards_state_api.py:492-512`).
+    Анкета живёт на под-маршруте карточки, поэтому доступ к ней можно
+    закрыть вместе с ней.
+
+    **`birth_date` здесь отсутствует и появиться не может** (AC-2, замок
+    12.3 `SENSITIVE_FIELDS`): наружу уходит только `age` — вычисленный
+    `compute_age` в сервисе. Комментарий не декоративный: поле добавляется
+    в схему, а не в SQL, поэтому гард 12.3 его не поймает — ловит замок
+    AC-2 в `test_card_author_profile_api.py`.
+
+    Все поля, кроме `uuid`, допускают `null`: анкеты может не быть вовсе
+    (участник не прошёл онбординг), и пустая анкета не должна ломать экран
+    карточки — тот же довод, что у `EventCardAuthor`.
+
+    `photo_url`/`photo_expires_in` — пара: ссылка есть ровно тогда, когда
+    есть срок (D-5a.4-6, Task 3.3). Фото живёт ТОЛЬКО здесь, не в
+    `EventCardAuthor` (D-12.7-5): иначе лента подписывала бы URL на каждый
+    элемент страницы (N+1 подписей).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    uuid: uuid_lib.UUID
+    name: str | None = None
+    # AC-2: вычисленный возраст. `birth_date` не отдаётся ни при каких
+    # значениях (12.3, NFR38).
+    age: int | None = None
+    city: str | None = None
+    bio: str | None = None
+    # AC-5 (NFR23, NFR34): подписанный URL, в БД ссылки нет.
+    photo_url: str | None = None
+    # AC-5, D-12.7-4: ОДНО число — и `ExpiresIn` подписи, и срок для клиента.
+    photo_expires_in: int | None = None
+
+
 class EventCardRead(EventCardRef):
     """AC-06 (§7.2, NFR51): полная карточка для ленты и детального экрана.
 
@@ -360,6 +506,23 @@ class EventCardRead(EventCardRef):
     # AC-01 стори 4.1: `null`, не `""` — project-context §4.
     description: str | None = None
     category: PlaceCategory
+    # AC-7 стори 12.4 (FR117, FR118): тип и активность видны в ленте до
+    # открытия карточки — «смысл встречи» перестаёт быть скрытым.
+    # Обязательные, потому что в БД они `NOT NULL`.
+    kind: CardKind
+    activity: Activity
+    # AC-2a стори 12.6 (FR119, ADR-19): рамки аудитории видны ДО подачи —
+    # автор указал, кого ищет, и участник вправе это знать, прежде чем
+    # подавать заявку. Поля обязательные (без умолчаний): NULL — законное
+    # значение («рамка не задана»), и умолчание маскировало бы забытую
+    # передачу в сборке ответа.
+    #
+    # Пометки «ты вне рамок» в карточке НЕТ намеренно (ADR-19 «Отвергнуто
+    # (в)»): рамки — констатация автора, а не оценка участника. Тон —
+    # констатация (UX §1052), не приглашение и не отказ.
+    gender_filter: Gender | None = None
+    age_min: int | None = None
+    age_max: int | None = None
     # AC-01: `timestamptz` из БД уже в UTC; сериализуется с `Z`.
     starts_at: datetime
     # AC-01, NFR14: момент закрытия окна решения — источник для `CountdownBadge`.
@@ -404,6 +567,24 @@ class EventCardRead(EventCardRef):
     # легальное состояние наблюдателя, а не «неизвестно». Третье значение
     # заставило бы клиент ветвиться на неопределённости.
     viewer_participates: bool = False
+    # AC-2, AC-5 стори 11.5 (FR82): признак «МОЯ ЗАЯВКА» — на карточке режима
+    # заявок (`capacity = 1`) зритель подал заявку, и она ещё `pending`.
+    #
+    # Почему не выводится из других полей: `viewer_participates` отвечает на
+    # вопрос «я в компании», а при `capacity = 1` до выбора автора это ВСЕГДА
+    # `false` — заявитель не участник. `filled_count` говорит «сколько мест
+    # занято», `status` — состояние карточки: у `published` бывает и живая, и
+    # истёкшая заявка. Список заявившихся участнику недоступен (FR81).
+    #
+    # `False`/`None` — легальные состояния наблюдателя и автора, а не
+    # «неизвестно»: третье значение заставило бы клиент ветвиться на
+    # неопределённости там, где ответ известен.
+    viewer_requested: bool = False
+    # AC-5 (FR82): `uuid` нужен, потому что отмена идёт по `DELETE
+    # /requests/{uuid}`, а не по `card_uuid`. Второе представление одного
+    # факта не вводится: `viewer_requested` — булев итог, `uuid` — адрес
+    # действия; оба приходят из одной строки `join_requests`.
+    viewer_request_uuid: uuid_lib.UUID | None = None
 
 
 class EventCardFeedResponse(BaseModel):

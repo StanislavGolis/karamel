@@ -30,7 +30,7 @@ async def _user(session: AsyncSession) -> int:
     row = await session.execute(
         text(
             "INSERT INTO users (uuid, provider, provider_user_id, phone, role, status, "
-            "age_confirmed, consent_given_at, community_slug) "
+            "age_confirmed, consent_given_at, city_slug) "
             "VALUES (gen_random_uuid(), 'phone', :p, :p, 'user', 'active', "
             "true, now(), 'tomsk') "
             "RETURNING id"
@@ -44,7 +44,7 @@ async def _chat(session: AsyncSession) -> int:
     author = await _user(session)
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', 'tomsk', true) RETURNING id"
         ),
         {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -53,11 +53,11 @@ async def _chat(session: AsyncSession) -> int:
     now = datetime.now(UTC)
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:a, :p, 'tomsk', 'Встреча', NULL, 'cafe', :s, 2, 60, :e, "
-            "'published', 0, 'approved', :pub) RETURNING id"
+            "'published', 0, 'approved', :pub, 'company', 'other') RETURNING id"
         ),
         {
             "a": author,

@@ -4,7 +4,11 @@
 `log_oauth_event`. Хелпер **не принимает** `**kwargs` — иначе ПД утекают «сами»,
 когда кто-то передаст `payload` или `email` «для отладки».
 
-Полный фильтр геолокации (lat/lng/accuracy) — стори 8.2: здесь только OAuth.
+Стори 12.3 (AC-1, AC-2; ADR-18, NFR66): здесь же живёт РЕЕСТР чувствительных
+полей `SENSITIVE_FIELDS` и процессор `RedactingSensitiveProcessor`, который
+режет их по ИМЕНАМ для всех логгеров. Прежний комментарий обещал фильтр
+геолокации «в стори 8.2» — фильтра не существовало (класс P-27), он создан
+здесь.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import MutableMapping, Sequence
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import structlog
 
@@ -29,6 +33,27 @@ ALLOWED_LOG_FIELDS = frozenset(
 # непригоден для разбора инцидента, а низкоуровневые логгеры (uvicorn, sqlalchemy)
 # теряют вообще все поля, если фильтр применён глобально.
 SERVICE_LOG_FIELDS = frozenset({"level", "timestamp", "event", "logger", "exc_info", "stack_info"})
+
+# Стори 12.3, AC-1 (ADR-18, NFR66): ЕДИНЫЙ реестр полей, которые не покидают
+# сервер ни в read-ответе, ни в логе. Оба потребителя (фильтр логов и, через
+# `COORDINATE_FIELDS`, обработчик ошибок валидации) читают отсюда, а не держат
+# литерал на месте: иначе новое ПД-поле пришлось бы дописывать в двух местах,
+# и одно из них рано или поздно отстало бы.
+#
+# Состав зафиксирован замером архитектуры (`architecture-v2-action-first.md:1062`)
+# и эпиком 12: `lat`/`lng`/`accuracy` — координаты устройства,
+# `coords`/`geo` — их контейнеры, `birth_date` — дата рождения (ADR-17).
+SENSITIVE_FIELDS: frozenset[str] = frozenset(
+    {"lat", "lng", "accuracy", "coords", "geo", "birth_date"}
+)
+
+# Стори 12.3, AC-2: подмножество для ДОМЕННОГО КОДА ошибки. НЕ равно реестру:
+# `birth_date` — персональные данные (в лог не пишется), но это НЕ координата.
+# Если подставить сюда `SENSITIVE_FIELDS`, ошибка валидации даты рождения
+# получит код `invalid_coordinates`, и клиент по контракту §4 покажет
+# «геолокация вернула мусор, повторите определение города» — вместо
+# «исправьте дату». Мутационное доказательство — пара тестов Task 3.4.
+COORDINATE_FIELDS: frozenset[str] = frozenset({"lat", "lng", "accuracy"})
 
 
 def _is_oauth_logger(logger: Any) -> bool:
@@ -136,9 +161,102 @@ class RedactingSecretsProcessor:
                 value = value.replace(secret, REDACTED_PLACEHOLDER)
             return value
         if isinstance(value, tuple | list):
-            return type(value)(cls._redact(item, secrets) for item in value)
+            items = [cls._redact(item, secrets) for item in value]
+            if isinstance(value, list):
+                return items
+            # CR 12.3, H-1 (тот же класс, что в `RedactingSensitiveProcessor`):
+            # `type(value)(iterable)` падал `TypeError` на tuple-подклассе —
+            # `namedtuple`, `urllib.parse.ParseResult` из httpx. Исключение
+            # внутри процессора ломает сам вызов логирования.
+            if type(value) is tuple:
+                return tuple(items)
+            fields = getattr(value, "_fields", None)
+            if fields is not None:
+                return type(value)(*items)
+            return tuple(items)
         if isinstance(value, dict):
             return {key: cls._redact(item, secrets) for key, item in value.items()}
+        return value
+
+
+class RedactingSensitiveProcessor:
+    """Стори 12.3, AC-2: режет чувствительные поля ПО ИМЕНИ для всех логгеров.
+
+    Отличие от `RedactingOAuthLogger` — намеренное. Тот работает по allowlist и
+    привязан к префиксу `oauth`: глобальный allowlist вырезал бы поля у любого
+    логгера, включая ошибки БД, и лог потерял бы диагностику. Здесь наоборот —
+    точный denylist из шести имён (`SENSITIVE_FIELDS`): посторонние ключи
+    (`event`, `level`, `user_uuid`, `query`) остаются нетронутыми, ложных
+    срабатываний нет.
+
+    Замена, а не удаление: `lat=***` показывает, что поле передавалось, и
+    позволяет заметить сам факт передачи координат. Удаление ключа скрыло бы
+    и значение, и событие.
+
+    Регистр сравнивается как есть (`birth_date`, не `Birth-Date`) — нормализация
+    ключей ломала бы `event_dict` и расходилась бы с именами полей схем.
+    """
+
+    #: Предел глубины обхода. Логи содержат структуры на 2–3 уровня; более
+    #: глубокий обход на произвольном объекте дал бы циклы и съел время
+    #: в момент инцидента, когда логи нужны быстрее всего.
+    MAX_DEPTH = 6
+
+    def __call__(
+        self, _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+    ) -> MutableMapping[str, Any]:
+        return cast(
+            MutableMapping[str, Any], self._redact(event_dict, depth=0)
+        )
+
+    @classmethod
+    def _redact(cls, value: Any, *, depth: int) -> Any:
+        """Ключи из реестра → `***`; контейнеры обходятся вглубь до `MAX_DEPTH`.
+
+        Обход нужен потому, что координаты приходят не только плоским
+        `lat=...`: ошибка httpx печатает `request={"params": {"lat": ...}}`,
+        и без рекурсии значение уцелело бы внутри словаря.
+        """
+        # CR 12.3, H-2: за пределом глубины возвращалось СЫРОЕ поддерево —
+        # то есть фильтр отказывал открыто (fail-open) ровно там, где структура
+        # неожиданна. Контейнер глубже предела скрывается целиком: не зная, что
+        # внутри, безопаснее не логировать ничего, чем логировать всё.
+        if depth > cls.MAX_DEPTH:
+            return REDACTED_PLACEHOLDER if isinstance(value, dict | tuple | list) else value
+        if isinstance(value, dict):
+            return {
+                key: (
+                    REDACTED_PLACEHOLDER
+                    if isinstance(key, str) and key in SENSITIVE_FIELDS
+                    else cls._redact(item, depth=depth + 1)
+                )
+                for key, item in value.items()
+            }
+        if isinstance(value, tuple | list):
+            items = [cls._redact(item, depth=depth + 1) for item in value]
+            if isinstance(value, list):
+                return items
+            # CR 12.3, H-1: `type(value)(iterable)` падал `TypeError` на любом
+            # tuple-подклассе — `namedtuple`, `urllib.parse.ParseResult` (его
+            # кладёт в лог httpx как `request.url`). Исключение внутри
+            # процессора ломает САМ вызов логирования: вместо строки в журнале
+            # получаем 500 в обработчике ошибок, то есть логи теряются ровно
+            # в момент инцидента. Здесь кортеж собирается безопасно.
+            if type(value) is tuple:
+                return tuple(items)
+            fields = getattr(value, "_fields", None)
+            if fields is not None:
+                # Поля namedtuple режутся по ИМЕНИ так же, как ключи словаря:
+                # `Geo(lat=..., lng=...)` — тот же носитель координат.
+                return type(value)(
+                    *(
+                        REDACTED_PLACEHOLDER
+                        if isinstance(name, str) and name in SENSITIVE_FIELDS
+                        else item
+                        for name, item in zip(fields, items, strict=False)
+                    )
+                )
+            return tuple(items)
         return value
 
 
@@ -159,6 +277,11 @@ def configure_logging() -> None:
             # после всех процессоров, добавляющих поля. Позиция после
             # `RedactingOAuthLogger` не важна: тот режет имена, этот значения.
             RedactingSecretsProcessor(),
+            # Стори 12.3, AC-2: редакция ПД по ИМЕНАМ полей (`SENSITIVE_FIELDS`),
+            # для ВСЕХ логгеров. Стоит после `RedactingSecretsProcessor`:
+            # секреты режутся по значению, ПД — по ключу, порядок между ними
+            # не важен, но оба обязаны стоять до `JSONRenderer`.
+            RedactingSensitiveProcessor(),
             RedactingOAuthLogger(),
             structlog.processors.JSONRenderer(),
         ],

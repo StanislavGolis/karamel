@@ -47,8 +47,8 @@ _CREATED_PLACES: list[int] = []
 class _CardSettings:
     """Минимум настроек сервиса карточек (протокол `CardSettings`)."""
 
-    default_community_slug = settings.default_community_slug
-    community_slugs = [settings.default_community_slug]
+    default_city_slug = settings.default_city_slug
+    city_slugs = [settings.default_city_slug]
 
 
 async def _new_user(session: AsyncSession) -> User:
@@ -69,10 +69,10 @@ async def _new_user(session: AsyncSession) -> User:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_community_slug},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_city_slug},
     )
     place_id = int(row.scalar_one())
     _CREATED_PLACES.append(place_id)
@@ -87,16 +87,17 @@ async def _seed(
     place_id = await _place(session)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, 1, 60, "
-            ":expires, 'published', 0, 'approved', :published_at) RETURNING uuid, id"
+            ":expires, 'published', 0, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "author": author.id,
             "place": place_id,
-            "slug": settings.default_community_slug,
+            "slug": settings.default_city_slug,
             "starts": now + timedelta(days=3),
             "expires": now - timedelta(minutes=5),
             "published_at": now - timedelta(days=1),
@@ -246,7 +247,7 @@ async def test_lazy_read_takes_locks_in_same_order(capture: object) -> None:
             session,
             card_uuid=card_uuid,
             viewer_id=viewer.id if viewer_token else 0,
-            viewer_community_slug="tomsk",
+            viewer_city_slug="tomsk",
             settings=_CardSettings(),
             now=datetime.now(UTC) + timedelta(minutes=1),
         )

@@ -35,11 +35,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import command
+from tests.conftest import HEAD_REVISION
 
 pytestmark = [
     pytest.mark.integration,
+    # Стори 12.9 (AC-4, W-11.4-d): DDL на общей схеме — несовместим с xdist.
+    pytest.mark.ddl,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
+
 
 API_ROOT = Path(__file__).resolve().parents[2]
 
@@ -133,7 +137,7 @@ async def _seed_pair() -> tuple[int, int]:
                     await connection.execute(
                         text(
                             "INSERT INTO users (provider, provider_user_id, phone, role, "
-                            "gender, status, community_slug) "
+                            "gender, status, city_slug) "
                             "VALUES ('phone', :p, :p, 'user', 'female', 'active', "
                             "'tomsk') RETURNING id"
                         ),
@@ -146,7 +150,7 @@ async def _seed_pair() -> tuple[int, int]:
                     await connection.execute(
                         text(
                             "INSERT INTO places (name, category, address_text, "
-                            "community_slug, is_active) VALUES (:n, 'cafe', 'ул. Мира, 1', "
+                            "city_slug, is_active) VALUES (:n, 'cafe', 'ул. Мира, 1', "
                             "'tomsk', true) RETURNING id"
                         ),
                         {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -157,11 +161,13 @@ async def _seed_pair() -> tuple[int, int]:
                 (
                     await connection.execute(
                         text(
-                            "INSERT INTO event_cards (author_id, place_id, community_slug, "
+                            "INSERT INTO event_cards (author_id, place_id, city_slug, "
                             "title, description, category, starts_at, capacity, "
                             "decision_window_minutes, expires_at, status, filled_count, "
-                            "verification_status) VALUES (:a, :p, 'tomsk', 'Встреча', NULL, "
-                            "'cafe', :st, 2, 60, :e, 'full', 2, 'approved') RETURNING id"
+                            "verification_status,"
+                            "kind, activity) VALUES (:a, :p, 'tomsk', 'Встреча', NULL, "
+                            "'cafe', :st, 2, 60, :e, 'full', 2, 'approved',"
+                            "'company', 'other') RETURNING id"
                         ),
                         {
                             "a": user_id,
@@ -206,7 +212,7 @@ async def _seed_chat() -> tuple[int, int]:
                     await connection.execute(
                         text(
                             "INSERT INTO users (provider, provider_user_id, phone, role, "
-                            "gender, status, community_slug) "
+                            "gender, status, city_slug) "
                             "VALUES ('phone', :p, :p, 'user', 'female', 'active', "
                             "'tomsk') RETURNING id"
                         ),
@@ -219,7 +225,7 @@ async def _seed_chat() -> tuple[int, int]:
                     await connection.execute(
                         text(
                             "INSERT INTO places (name, category, address_text, "
-                            "community_slug, is_active) VALUES (:n, 'cafe', 'ул. Мира, 1', "
+                            "city_slug, is_active) VALUES (:n, 'cafe', 'ул. Мира, 1', "
                             "'tomsk', true) RETURNING id"
                         ),
                         {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -230,11 +236,13 @@ async def _seed_chat() -> tuple[int, int]:
                 (
                     await connection.execute(
                         text(
-                            "INSERT INTO event_cards (author_id, place_id, community_slug, "
+                            "INSERT INTO event_cards (author_id, place_id, city_slug, "
                             "title, description, category, starts_at, capacity, "
                             "decision_window_minutes, expires_at, status, filled_count, "
-                            "verification_status) VALUES (:a, :p, 'tomsk', 'Встреча', NULL, "
-                            "'cafe', :st, 2, 60, :e, 'full', 2, 'approved') RETURNING id"
+                            "verification_status,"
+                            "kind, activity) VALUES (:a, :p, 'tomsk', 'Встреча', NULL, "
+                            "'cafe', :st, 2, 60, :e, 'full', 2, 'approved',"
+                            "'company', 'other') RETURNING id"
                         ),
                         {
                             "a": user_id,
@@ -427,7 +435,7 @@ def test_single_head_and_down_revision() -> None:
     # Сравнение с ТЕКУЩЕЙ вершиной, а не «тест номера»: собственные связки
     # `reports` проверяются ниже и от номера вершины не зависят.
     # Стори 10.2: вершина — `0033` (частичный индекс `users.deletion_requested_at`).
-    assert _heads() == ("0033",)
+    assert _heads() == (HEAD_REVISION,)
     assert _down_revision_of("0025") == "0024"
     # Стори 7.5: звено `0024` (индекс истории явок) не меняет `0023`.
     assert _down_revision_of("0024") == "0023"

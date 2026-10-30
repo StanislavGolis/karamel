@@ -437,6 +437,11 @@ def _to_card_request_item(entry: CardRequestsEntry) -> CardRequestsItem:
             # не показывает протухший URL молча (OQ-5a.3-1).
             photo_expires_in=(settings.s3_signed_url_ttl if entry.photo_url is not None else None),
         ),
+        # AC-3 стори 12.6 (FR119): попадание заявителя в рамки карточки.
+        # Значение пришло из SQL-проекции — того же предиката, что фильтрует
+        # автовыбор (AC-5a); второго вычисления здесь нет. `None` — у карточки
+        # рамок нет; заявителю это поле не отдаётся никогда (AC-4, FR81).
+        within_bounds=entry.within_bounds,
     )
 
 

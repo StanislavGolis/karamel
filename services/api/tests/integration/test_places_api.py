@@ -44,9 +44,9 @@ pytestmark = [
 EXPECTED_KEYS = {"uuid", "name", "category", "address_text", "is_active"}
 
 
-def _community() -> str:
+def _city() -> str:
     """Слаг сообщества из конфига пилота: тест не должен знать `.env` наизусть."""
-    return settings.community_slugs[0]
+    return settings.city_slugs[0]
 
 
 def _payload(**overrides: Any) -> dict[str, Any]:
@@ -55,7 +55,7 @@ def _payload(**overrides: Any) -> dict[str, Any]:
         "name": "Кафе „Прага“",
         "category": "cafe",
         "address_text": "пр. Ленина, 1",
-        "community_slug": _community(),
+        "city_slug": _city(),
     }
     base.update(overrides)
     return base
@@ -97,7 +97,7 @@ async def _place_row(session: AsyncSession, place_uuid: str) -> dict[str, Any] |
     """Строка места из БД сырым SQL: проверяется PostgreSQL, а не identity map."""
     result = await session.execute(
         text(
-            "SELECT name, category, address_text, community_slug, is_active "
+            "SELECT name, category, address_text, city_slug, is_active "
             "FROM places WHERE uuid = :uuid"
         ),
         {"uuid": place_uuid},
@@ -116,14 +116,14 @@ async def _insert_place(session: AsyncSession, **overrides: Any) -> str:
         "name": "Кино „Победа“",
         "category": "cinema",
         "address_text": "пр. Ленина, 2",
-        "community_slug": _community(),
+        "city_slug": _city(),
         "is_active": True,
         **overrides,
     }
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
-            "VALUES (:name, :category, :address_text, :community_slug, :is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
+            "VALUES (:name, :category, :address_text, :city_slug, :is_active) "
             "RETURNING uuid"
         ),
         values,
@@ -311,10 +311,10 @@ async def test_patch_restores_hidden_place(client: AsyncClient, session: AsyncSe
     assert row["is_active"] is True
 
 
-async def test_patch_rejects_community_slug(client: AsyncClient, session: AsyncSession) -> None:
+async def test_patch_rejects_city_slug(client: AsyncClient, session: AsyncSession) -> None:
     """AC-06, R-05: перенос между сообществами — `422`.
 
-    Краснеет, если вернуть `community_slug` в `PlaceUpdate` или снять
+    Краснеет, если вернуть `city_slug` в `PlaceUpdate` или снять
     `extra="forbid"`: перенос прошёл бы молча (`200`), и место оказалось бы
     в чужой ленте без действия администратора.
     """
@@ -323,17 +323,17 @@ async def test_patch_rejects_community_slug(client: AsyncClient, session: AsyncS
 
     response = await client.patch(
         f"/api/v1/places/{place_uuid}",
-        json={"community_slug": "kemerovo"},
+        json={"city_slug": "kemerovo"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 
     assert response.status_code == 422
     # QD A4 (R-05): доменный код вместо общего `invalid_request` — «перенос
     # между сообществами запрещён» больше не выглядит как сломанная форма.
-    assert response.json() == {"code": "place_community_immutable"}
+    assert response.json() == {"code": "place_city_immutable"}
     row = await _place_row(session, place_uuid)
     assert row is not None
-    assert row["community_slug"] == _community()
+    assert row["city_slug"] == _city()
 
 
 async def test_patch_unknown_uuid_is_404(client: AsyncClient, session: AsyncSession) -> None:
@@ -469,7 +469,7 @@ async def test_delete_unknown_uuid_is_404(client: AsyncClient, session: AsyncSes
         ({"address_text": "\u200b"}, "address_text_required"),
         ({"name": "\ufb2c" * 41}, "name_too_long"),
         ({"address_text": "\ufb2c" * 86}, "address_text_too_long"),
-        ({"community_slug": "tomsk1"}, "PLACE_UNKNOWN_COMMUNITY"),
+        ({"city_slug": "tomsk1"}, "PLACE_UNKNOWN_COMMUNITY"),
     ],
 )
 async def test_validation_codes(
@@ -631,7 +631,7 @@ async def test_patch_hidden_duplicate_is_archived_on_api(
 ) -> None:
     """CR 3.2, патч 6 (AC-03): `PLACE_ARCHIVED` + `existing_uuid` и на `PATCH`.
 
-    §18.1: краснеет от отката патча 6. До него обращение к `place.community_slug`
+    §18.1: краснеет от отката патча 6. До него обращение к `place.city_slug`
     в логе после отката SAVEPOINT давало `MissingGreenlet` → `500`, и админ не
     получал единственного действия — «восстановить вот это место».
     Unit-тест покрывал сервис, здесь проверяется HTTP-форма `details`.
@@ -653,7 +653,7 @@ async def test_patch_hidden_duplicate_is_archived_on_api(
     }
 
 
-async def test_post_unknown_community_slug_shape_matches_service(
+async def test_post_unknown_city_slug_shape_matches_service(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """CR 3.2, патч 4 (AC-07): слаг не по шаблону и слаг вне конфига — один код.
@@ -666,12 +666,12 @@ async def test_post_unknown_community_slug_shape_matches_service(
 
     upper = await client.post(
         "/api/v1/places",
-        json=_payload(name="Место 1", community_slug="Tomsk"),
+        json=_payload(name="Место 1", city_slug="Tomsk"),
         cookies={ACCESS_COOKIE_NAME: token},
     )
     unknown = await client.post(
         "/api/v1/places",
-        json=_payload(name="Место 2", community_slug="zzzz"),
+        json=_payload(name="Место 2", city_slug="zzzz"),
         cookies={ACCESS_COOKIE_NAME: token},
     )
 
@@ -776,11 +776,11 @@ async def test_update_duplicate_race_keeps_session_alive(
     - без патча 3 присваивание полей шло ДО `begin_nested()`: `UPDATE` уходил
       вне SAVEPOINT, `IntegrityError` откатывал всю транзакцию, и вместо
       `PlaceDuplicateError` вылетал `PendingRollbackError` (`500`);
-    - без патча 6 `except`-ветка читала `place.community_slug` у объекта,
+    - без патча 6 `except`-ветка читала `place.city_slug` у объекта,
       экспиренного откатом SAVEPOINT → `MissingGreenlet` (`500`).
 
     Дешёвая проверка дубля обходится намеренно: она не видит конкурента —
-    ровно так выглядит гонка двух `PATCH`. Гарантию даёт `uq_places_community_name`.
+    ровно так выглядит гонка двух `PATCH`. Гарантию даёт `uq_places_city_name`.
     """
     from app.services.place_service import PlaceDuplicateError, update_place
 
@@ -793,13 +793,13 @@ async def test_update_duplicate_race_keeps_session_alive(
         """Дешёвый путь «конкурента нет» — как в настоящей гонке."""
         return None
 
-    original = PlaceRepository.exists_in_community_excluding
-    PlaceRepository.exists_in_community_excluding = _no_conflict  # type: ignore[method-assign]
+    original = PlaceRepository.exists_in_city_excluding
+    PlaceRepository.exists_in_city_excluding = _no_conflict  # type: ignore[method-assign]
     try:
         with pytest.raises(PlaceDuplicateError):
             await update_place(session, place=place, changes={"name": "Кино „Победа“"})
     finally:
-        PlaceRepository.exists_in_community_excluding = original  # type: ignore[method-assign]
+        PlaceRepository.exists_in_city_excluding = original  # type: ignore[method-assign]
 
     # Сессия обязана остаться рабочей: иначе следующий запрос в той же
     # транзакции падал бы `PendingRollbackError`, и весь составной сценарий

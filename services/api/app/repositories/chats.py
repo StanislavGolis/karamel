@@ -85,7 +85,7 @@ class ChatRepository:
     # ——— состав компании (стори 6.3; AC-02, AC-03, AC-04) ———
 
     @staticmethod
-    def build_participants_statement(*, card_id: int, community_slug: str) -> Any:
+    def build_participants_statement(*, card_id: int, city_slug: str) -> Any:
         """AC-01, AC-03 (ADR-04): состав компании — одним запросом.
 
         Состав НЕ хранится: он вычисляется из `join_requests`
@@ -118,6 +118,10 @@ class ChatRepository:
                 Profile.name.label("participant_name"),
                 Profile.age.label("participant_age"),
                 JoinRequest.submitted_at.label("participant_submitted_at"),
+                # Стори 12.2, AC-3: возраст вычисляется из `birth_date`.
+                # Колонка добавлена В КОНЕЦ, чтобы не сдвигать индексы
+                # существующих потребителей (0..4 — контракт сервиса).
+                Profile.birth_date.label("participant_birth_date"),
             )
             .join(User, User.id == JoinRequest.applicant_id)
             .outerjoin(Profile, Profile.user_id == User.id)
@@ -125,7 +129,7 @@ class ChatRepository:
                 JoinRequest.card_id == card_id,
                 JoinRequest.status == JoinRequestStatus.SELECTED,
                 JoinRequest.card_id.in_(
-                    select(EventCard.id).where(EventCard.community_slug == community_slug)
+                    select(EventCard.id).where(EventCard.city_slug == city_slug)
                 ),
             )
             .order_by(JoinRequest.submitted_at.asc(), JoinRequest.id.asc()),
@@ -357,20 +361,26 @@ class ChatRepository:
         return _as_uuid(values[0]), int(values[1])
 
     async def list_participants(
-        self, *, card_id: int, community_slug: str
-    ) -> list[tuple[int, uuid_lib.UUID, str | None, int | None, Any]]:
+        self, *, card_id: int, city_slug: str
+    ) -> list[tuple[int, uuid_lib.UUID, str | None, int | None, Any, Any]]:
         """AC-01, AC-03: участники компании (`selected`) в порядке присоединения.
 
-        Возвращает кортежи `(user_id, user_uuid, name, age, submitted_at)`:
+        Возвращает кортежи `(user_id, user_uuid, name, age, submitted_at, birth_date)`:
         `user_id` нужен только для пакетной подписи фото и наружу не выходит
-        (D-2). `name`/`age` — из LEFT JOIN `profiles`: анкеты может не быть.
+        (D-2). `name`/`age`/`birth_date` — из LEFT JOIN `profiles`: анкеты
+        может не быть. `birth_date` — последний элемент осознанно: возраст
+        вычисляет сервис (`compute_age`), а не SQL, иначе день рождения
+        зависел бы от часового пояса БД и от `now()` внутри запроса.
 
         Автора здесь нет — его добавляет сервис (D-6.3-3).
         """
         result = await self._session.execute(
-            self.build_participants_statement(card_id=card_id, community_slug=community_slug)
+            self.build_participants_statement(card_id=card_id, city_slug=city_slug)
         )
-        return [(int(row[0]), _as_uuid(row[1]), row[2], row[3], row[4]) for row in result.all()]
+        return [
+            (int(row[0]), _as_uuid(row[1]), row[2], row[3], row[4], row[5])
+            for row in result.all()
+        ]
 
     @staticmethod
     def build_get_by_uuid_statement(*, chat_uuid: uuid_lib.UUID) -> Select[Any]:

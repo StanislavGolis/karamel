@@ -1,3 +1,19 @@
+/**
+ * Часовой пояс тестов фиксирован (стори 12.5, AC-3).
+ *
+ * `formatStartsAt`/`formatRelativeDay`/`formatShortDeadline` берут **зону
+ * машины** (`date.getHours()`, `date.getDay()`) — так работает код, и это
+ * зафиксировано долгом `W-12.5-a` (`city_timezone` клиенту не отдаётся).
+ * Пока долг открыт, тест на «Чт, 19:00» верен только в одной зоне: в CI (UTC)
+ * и в контейнере разработчика (+09) он краснел бы не по делу.
+ *
+ * `process.env.TZ` до инициализации воркеров: Node пересчитывает зону в
+ * рантайме, но выставлять её в `setup.ts` поздно — первый `Date` мог быть
+ * создан раньше. Значение — зона продукта (Новосибирск +07 не нужен: тесты
+ * сравнивают часы, а не город).
+ */
+process.env.TZ = "Europe/Moscow";
+
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 import path from "node:path";
@@ -37,7 +53,15 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
-      include: ["src/components/**/*.tsx", "src/lib/**/*.ts"],
+      // N-7 (CR 11.2): `src/app/**` не входил — единственный публичный
+      // маршрут (`app/api/health/route.ts`) не измерялся вообще. Публичный
+      // health — тот файл, который обязан быть покрыт: его падение означает
+      // «монитор не видит стенд».
+      include: [
+        "src/components/**/*.tsx",
+        "src/lib/**/*.ts",
+        "src/app/api/**/route.ts",
+      ],
       exclude: ["src/**/*.test.{ts,tsx}", "src/test/**"],
     },
   },

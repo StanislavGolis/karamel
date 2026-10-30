@@ -49,7 +49,7 @@ async def _seed_due_card(session: AsyncSession) -> tuple[int, int, str]:
     member, _ = await _create_user(session)
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
         {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": "karamel"},
@@ -58,11 +58,11 @@ async def _seed_due_card(session: AsyncSession) -> tuple[int, int, str]:
     starts = datetime.now(UTC) + timedelta(days=1)
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, category, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, category, "
             "starts_at, capacity, decision_window_minutes, expires_at, status, filled_count, "
-            "verification_status, published_at) "
+            "verification_status, published_at, kind, activity) "
             "VALUES (:a, :p, 'karamel', 'Встреча', 'cafe', :st, 1, 60, :e, 'published', 0, "
-            "'approved', :pub) RETURNING id, uuid"
+            "'approved', :pub, 'company', 'coffee') RETURNING id, uuid"
         ),
         {
             "a": author.id,

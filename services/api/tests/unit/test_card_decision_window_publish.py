@@ -47,7 +47,7 @@ def test_feed_statement_excludes_expired_published_window() -> None:
     видел бы набор, где решение уже не принимается.
     """
     statement = EventCardRepository.build_feed_statement(
-        community_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
+        city_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
     )
     sql = str(statement)
 
@@ -64,7 +64,7 @@ def test_feed_count_statement_uses_same_window_predicate() -> None:
     получил бы «5 всего, 0 на странице» либо курсор в пустоту.
     """
     statement = EventCardRepository.build_feed_count_statement(
-        community_slug="tomsk", now=_NOW, category=None, has_seats=False
+        city_slug="tomsk", now=_NOW, category=None, has_seats=False
     )
     sql = str(statement)
 

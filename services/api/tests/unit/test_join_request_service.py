@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import uuid as uuid_lib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -32,7 +32,7 @@ COMMUNITY = "tomsk"
 class _Settings:
     """Протокол `JoinRequestSettings` без чтения `.env`."""
 
-    default_community_slug = COMMUNITY
+    default_city_slug = COMMUNITY
     join_request_active_limit = 2
 
 
@@ -51,7 +51,12 @@ class _Card:
         self.author_id = author_id
         self.status = status
         self.capacity = capacity
-        self.expires_at = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
+        # W-02 (стори 11.9): дата ОТНОСИТЕЛЬНАЯ момента вызова, а не литерал.
+        # Литерал `2026-10-25` стал прошлым 26 октября, и три теста начали
+        # падать на гарде истёкшего окна (5б.1) ДО проверяемого утверждения —
+        # не потому, что фейк разошёлся с контрактом, а потому что календарь
+        # прошёл. Отдельный тест истёкшего окна держит гард и остаётся как есть.
+        self.expires_at = datetime.now(UTC) + timedelta(days=7)
 
     @property
     def is_request_mode(self) -> bool:
@@ -72,7 +77,7 @@ class _Repo:
         self._log = log
 
     async def get_card_for_request(
-        self, card_uuid: uuid_lib.UUID, community_slug: str
+        self, card_uuid: uuid_lib.UUID, city_slug: str
     ) -> _Card | None:
         # CR 5а.2, патч 2: отметка о чтении карточки — без неё порядок
         # «блокировка ДО карточки» не наблюдаем: фейк не идёт в `session.execute`.
@@ -165,6 +170,28 @@ async def test_not_published_card_is_rejected(status: str) -> None:
     """
     with pytest.raises(CardNotAcceptingError):
         await _submit(_Repo(card=_Card(status=status)), _Session())
+
+
+async def test_expired_window_is_not_accepting() -> None:
+    """5б.1 (NFR20): истёкшее окно решения закрывает приём заявок — `409`.
+
+    **Зачем этот тест появился в CR 11.9.** Мутация H-7 («снять
+    `if card.expires_at <= moment`») прошла ВСЕ тесты: 12 unit зелёных и
+    14 integration (`test_card_decision_window_api.py`) тоже. То есть гард
+    существовал в коде и не был доказан ничем — ровно тот класс, который
+    P-25 называет «проверка формы вместо эффекта».
+
+    **Краснеет от:** снятия гарда (`if False`), смены `<=` на `<` на границе
+    `expires_at == moment`, и от переноса проверки ПОСЛЕ проверки режима —
+    тогда истёкшая карточка отвечала бы `CAPACITY_ONE_USES_REQUESTS`.
+    """
+    card = _Card()
+    # Ровно граница: `<=` обязан сработать. Карточка `capacity=1` — режим
+    # заявок, значит без гарда тест получил бы `CapacityOneUsesRequestsError`,
+    # а не `CardNotAcceptingError`.
+    card.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    with pytest.raises(CardNotAcceptingError):
+        await _submit(_Repo(card=card), _Session())
 
 
 async def test_capacity_above_one_is_rejected() -> None:

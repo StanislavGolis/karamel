@@ -102,7 +102,7 @@ async def _create_user(session: AsyncSession) -> int:
     row = await session.execute(
         text(
             "INSERT INTO users (uuid, provider, provider_user_id, phone, role, status, "
-            "age_confirmed, consent_given_at, community_slug) "
+            "age_confirmed, consent_given_at, city_slug) "
             "VALUES (gen_random_uuid(), 'phone', :phone, :phone, 'user', 'active', "
             "true, now(), 'tomsk') "
             "RETURNING id"
@@ -115,7 +115,7 @@ async def _create_user(session: AsyncSession) -> int:
 async def _create_place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', 'tomsk', true) RETURNING id"
         ),
         {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}"},
@@ -128,11 +128,11 @@ async def _create_card(session: AsyncSession, *, author_id: int, place_id: int) 
     now = datetime.now(UTC)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, 'tomsk', 'Встреча', NULL, 'cafe', :starts, 3, 2880, "
-            ":expires, 'published', 0, 'approved', :published_at) RETURNING id"
+            ":expires, 'published', 0, 'approved', :published_at, 'company', 'other') RETURNING id"
         ),
         {
             "author": author_id,
@@ -493,5 +493,5 @@ async def test_debt_indexes_exist_in_database(session: AsyncSession) -> None:
     assert "(applicant_id, submitted_at, uuid)" in defs["ix_join_requests_applicant_visible"]
     assert "WHERE" in defs["ix_join_requests_applicant_visible"]
     # X-5b.1-1: порядок ленты и частичный предикат по статусам.
-    assert "(community_slug, starts_at, uuid)" in defs["ix_event_cards_feed_visible"]
+    assert "(city_slug, starts_at, uuid)" in defs["ix_event_cards_feed_visible"]
     assert "WHERE" in defs["ix_event_cards_feed_visible"]

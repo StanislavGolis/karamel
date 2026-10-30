@@ -88,8 +88,8 @@ def test_constraint_name_read_from_nested_orig() -> None:
     §18.1: краснеет от отката общего хелпера на старую форму
     `getattr(error.orig, "constraint_name")` — она возвращает `None` всегда.
     """
-    error: Any = _asyncpg_error("uq_places_community_name")
+    error: Any = _asyncpg_error("uq_places_city_name")
 
-    assert constraint_name_of(error) == "uq_places_community_name"
+    assert constraint_name_of(error) == "uq_places_city_name"
     # Доказательство, что старая форма действительно не работает:
     assert getattr(error.orig, "constraint_name", None) is None

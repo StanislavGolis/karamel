@@ -1093,7 +1093,12 @@ async def test_edits_do_not_touch_users_or_create_rows(
     # Черновик, созданный загрузкой фото, дозаполняется до `complete`.
     patched = await client.patch(
         "/api/v1/profiles/me",
-        json={"name": "Аня", "city": "Томск", "age": 32, "bio": "люблю горы"},
+        json={
+            "name": "Аня",
+            "city": "Томск",
+            "birth_date": "1994-03-14",
+            "bio": "люблю горы",
+        },
         cookies=cookies,
     )
     assert patched.status_code == 200
@@ -1265,7 +1270,12 @@ async def test_replace_keeps_profile_row_unchanged(
     )
     await client.patch(
         "/api/v1/profiles/me",
-        json={"name": "Аня", "city": "Томск", "age": 32, "bio": "люблю горы"},
+        json={
+            "name": "Аня",
+            "city": "Томск",
+            "birth_date": "1994-03-14",
+            "bio": "люблю горы",
+        },
         cookies=cookies,
     )
     before = (

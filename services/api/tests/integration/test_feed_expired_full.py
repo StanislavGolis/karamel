@@ -91,10 +91,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_community_slug},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_city_slug},
     )
     return int(row.scalar_one())
 
@@ -106,16 +106,17 @@ async def _insert_full_card_with_expired_window(
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Собранная', NULL, 'cafe', :starts, 1, 60, "
-            ":expires, 'full', 1, 'approved', :published_at) RETURNING uuid, id"
+            ":expires, 'full', 1, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": settings.default_community_slug,
+            "slug": settings.default_city_slug,
             "starts": starts,
             "expires": datetime.now(UTC) - timedelta(minutes=5),
             "published_at": starts - timedelta(days=1),
@@ -212,16 +213,16 @@ async def test_join_on_full_open_set_card_with_expired_window_is_not_accepting(
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Собранная', NULL, 'cafe', :starts, 3, 60, "
-            ":expires, 'full', 3, 'approved', :published_at) RETURNING uuid"
+            ":expires, 'full', 3, 'approved', :published_at, 'company', 'coffee') RETURNING uuid"
         ),
         {
             "author": author.id,
             "place": place_id,
-            "slug": settings.default_community_slug,
+            "slug": settings.default_city_slug,
             "starts": starts,
             "expires": datetime.now(UTC) - timedelta(minutes=5),
             "published_at": starts - timedelta(days=1),

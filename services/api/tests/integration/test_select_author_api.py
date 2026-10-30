@@ -74,10 +74,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_community_slug},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_city_slug},
     )
     return int(row.scalar_one())
 
@@ -91,7 +91,7 @@ async def _insert_card(
     filled_count: int = 0,
     status: str = "published",
     expires_in_minutes: int = 60,
-    community_slug: str | None = None,
+    city_slug: str | None = None,
 ) -> tuple[str, int]:
     """Карточка с управляемым окном решения и состоянием.
 
@@ -103,16 +103,17 @@ async def _insert_card(
     expires = datetime.now(UTC) + timedelta(minutes=expires_in_minutes)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, 60, "
-            ":expires, :status, :filled, 'approved', :published_at) RETURNING uuid, id"
+            ":expires, :status, :filled, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": community_slug or settings.default_community_slug,
+            "slug": city_slug or settings.default_city_slug,
             "starts": starts,
             "capacity": capacity,
             "expires": expires,
@@ -446,19 +447,19 @@ async def test_missing_request_gets_request_not_found(
     assert response.json()["code"] == "request_not_found"
 
 
-async def test_foreign_community_gets_card_not_found(
+async def test_foreign_city_gets_card_not_found(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-04 (ADR-13): карточка чужого сообщества неотличима от чужой.
 
-    Краснеет, если убрать `community_slug` из `build_get_card_for_select_statement`:
+    Краснеет, если убрать `city_slug` из `build_get_card_for_select_statement`:
     заявка чужого сообщества прошла бы выбор.
     """
     author, author_token = await _new_user(session)
     applicant, _ = await _new_user(session)
     place_id = await _place(session)
     _, card_id = await _insert_card(
-        session, author_id=author.id, place_id=place_id, community_slug="other-city"
+        session, author_id=author.id, place_id=place_id, city_slug="other-city"
     )
     request_uuid, _ = await _insert_request(session, card_id=card_id, applicant_id=applicant.id)
 

@@ -38,7 +38,7 @@ async def _insert_user_with_id(session: AsyncSession, user_id: int) -> None:
     await session.execute(
         text(
             "INSERT INTO users (id, uuid, provider, provider_user_id, phone, role, status, "
-            "age_confirmed, consent_given_at, community_slug) "
+            "age_confirmed, consent_given_at, city_slug) "
             "VALUES (:id, gen_random_uuid(), 'phone', :phone, :phone, 'user', 'active', "
             "true, now(), 'tomsk')"
         ),

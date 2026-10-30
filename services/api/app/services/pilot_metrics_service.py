@@ -197,7 +197,7 @@ async def build_metrics(
 ) -> PilotMetrics:
     """Собирает ответ кабинета: ровно ЧЕТЫРЕ запроса к БД (Task 3.7).
 
-    Срез — `settings.default_community_slug` (AC-01.6, ADR-01): в пилоте одно
+    Срез — `settings.default_city_slug` (AC-01.6, ADR-01): в пилоте одно
     сообщество, и «метрики по всем сообществам сразу» смешали бы два рынка.
 
     Запросов ровно четыре — по одному на метрику. Пятый запрос (например,
@@ -208,19 +208,19 @@ async def build_metrics(
     # Аргументы передаются ЯВНО, а не через `**common`: `dict[str, object]`
     # несовместим с типизированными параметрами (`mypy --strict`), и ошибка
     # в имени ключа стала бы `TypeError` в рантайме вместо ошибки типа.
-    community_slug = settings.default_community_slug
+    city_slug = settings.default_city_slug
 
     assembled = await repository.count_assembled(
-        community_slug=community_slug, period_from=period_from, period_to=period_to
+        city_slug=city_slug, period_from=period_from, period_to=period_to
     )
     joined = await repository.count_joined_avg(
-        community_slug=community_slug, period_from=period_from, period_to=period_to
+        city_slug=city_slug, period_from=period_from, period_to=period_to
     )
     attendance = await repository.count_attendance_confirmed(
-        community_slug=community_slug, period_from=period_from, period_to=period_to
+        city_slug=city_slug, period_from=period_from, period_to=period_to
     )
     repeat = await repository.count_repeat_authors(
-        community_slug=community_slug, period_from=period_from, period_to=period_to
+        city_slug=city_slug, period_from=period_from, period_to=period_to
     )
 
     raw: tuple[tuple[str, tuple[int, int], float], ...] = (

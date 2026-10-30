@@ -37,8 +37,8 @@ pytestmark = [
 ]
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 def _future(**delta: int) -> datetime:
@@ -72,10 +72,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _city()},
     )
     return int(row.scalar_one())
 
@@ -93,16 +93,17 @@ async def _card(
     expires = expires_at or (starts - timedelta(hours=1))
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, 2, 60, "
-            ":expires, :status, 0, 'approved', :published_at) RETURNING id, uuid"
+            ":expires, :status, 0, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING id, uuid"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": _community(),
+            "slug": _city(),
             "starts": starts,
             "expires": expires,
             "status": status,
@@ -310,25 +311,27 @@ async def test_lazy_close_race_updates_exactly_one_row(engine: Any) -> None:
 
         place_row = await setup.execute(
             text(
-                "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+                "INSERT INTO places (name, category, address_text, city_slug, is_active) "
                 "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
             ),
-            {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _community()},
+            {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _city()},
         )
         place_id = int(place_row.scalar_one())
 
         card_row = await setup.execute(
             text(
-                "INSERT INTO event_cards (author_id, place_id, community_slug, title, "
+                "INSERT INTO event_cards (author_id, place_id, city_slug, title, "
                 "description, category, starts_at, capacity, decision_window_minutes, "
-                "expires_at, status, filled_count, verification_status, published_at) "
+                "expires_at, status, filled_count, verification_status, published_at,"
+                "kind, activity) "
                 "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, 2, 60, "
-                ":expires, 'published', 0, 'approved', :published_at) RETURNING id"
+                ":expires, 'published', 0, 'approved', :published_at,"
+                "'company', 'coffee') RETURNING id"
             ),
             {
                 "author": author_id,
                 "place": place_id,
-                "slug": _community(),
+                "slug": _city(),
                 "starts": _future(hours=1),
                 "expires": _future(hours=-1),
                 "published_at": _future(days=-1),

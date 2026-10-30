@@ -51,7 +51,7 @@ def test_cancel_statement_scopes_by_applicant() -> None:
     assert "join_requests.uuid = :uuid_1" in sql
 
 
-def test_cancel_statement_scopes_by_community() -> None:
+def test_cancel_statement_scopes_by_city() -> None:
     """AC-04 (ADR-01/ADR-13): карточка чужого сообщества не отменяется.
 
     Краснеет, если убрать подзапрос: заявка чужого сообщества отменялась бы
@@ -59,7 +59,7 @@ def test_cancel_statement_scopes_by_community() -> None:
     """
     sql = _sql(JoinRequestRepository.build_cancel_statement(uuid_lib.uuid4(), 7, "tomsk"))
 
-    assert "event_cards.community_slug = :community_slug_1" in sql
+    assert "event_cards.city_slug = :city_slug_1" in sql
     assert "join_requests.card_id IN (SELECT event_cards.id" in sql
 
 
@@ -74,7 +74,7 @@ def test_status_lookup_has_same_three_predicates() -> None:
     assert sql.startswith("SELECT join_requests.status")
     assert "join_requests.uuid = :uuid_1" in sql
     assert "join_requests.applicant_id = :applicant_id_1" in sql
-    assert "event_cards.community_slug = :community_slug_1" in sql
+    assert "event_cards.city_slug = :city_slug_1" in sql
 
 
 def test_status_lookup_does_not_filter_by_status() -> None:

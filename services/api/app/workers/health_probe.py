@@ -14,8 +14,18 @@ healthcheck добавил бы второй, независимый сигна�
 
 **Что именно проверяется.** `GET {api_url}/health/deep` (Task 2.1): 200 =
 успех, ЛЮБОЙ другой исход (503, 500, таймаут, отказ соединения) = неуспех.
-Тело не разбирается: разбор дал бы ветку «форма ответа не та», а это тоже
-неуспех — решение о причине принимает человек по `checks` в логе api.
+
+**Тело разбирается ТОЛЬКО ради `checks.backup`** (стори 11.10, AC-4). До
+11.10 тело не разбиралось намеренно: разбор давал бы ветку «форма ответа не
+та», а это тоже неуспех. Причина изменилась: `backup: stale` приходит с
+кодом **200** (задача 4.3 — деградация бэкапа не отказ сервиса), поэтому
+без разбора тела этот сигнал не виден никому. Разбор узкий: читается одно
+поле, отсутствие или другой формат тела — не ошибка, а отсутствие сигнала.
+
+**Почему ключ дедупа отдельный.** `alert:backup_stale:sent` ≠
+`alert:health:sent`: устаревший бэкап и недоступный сервис — два разных
+инцидента с разными действиями дежурного. Общий ключ глушил бы второй на
+час после первого (прецедент `REDIS_ALERT_KEY`).
 
 **Недоступность Redis — алерт немедленно** (D-10.7-3). Счётчик «2 подряд»
 живёт в Redis; если Redis лёг, считать нечем, а Redis — обязательная
@@ -52,6 +62,11 @@ HEALTH_ALERT_KEY = "alert:health:sent"
 # то есть «Redis лёг» не было бы замечено никогда.
 REDIS_ALERT_KEY = "alert:redis_unavailable:sent"
 
+# Ключ дедупа алерта об устаревшем бэкапе (стори 11.10, AC-4). Отдельный от
+# `HEALTH_ALERT_KEY`: устаревший бэкап и недоступный api — разные инциденты,
+# и общий ключ заглушил бы второй на час после первого.
+BACKUP_ALERT_KEY = "alert:backup_stale:sent"
+
 logger = structlog.get_logger(__name__)
 
 
@@ -60,20 +75,64 @@ def _deep_health_url() -> str:
     return f"{settings.api_url.rstrip('/')}/health/deep"
 
 
-async def _probe(client: httpx.AsyncClient) -> tuple[bool, str]:
-    """Один HTTP-запрос. Возвращает `(успех, тип_ошибки_или_пусто)`.
+async def _probe(client: httpx.AsyncClient) -> tuple[bool, str, dict[str, object]]:
+    """Один HTTP-запрос. Возвращает `(успех, тип_ошибки_или_пусто, checks)`.
 
     Широкий `except` намеренный: любая ошибка транспорта означает одно —
     api не ответил. Перечисление типов дало бы дыру на незнакомом исключении,
     и probe упал бы вместо того, чтобы посчитать неудачу.
+
+    `checks` — третье поле ради `backup` (стори 11.10, AC-4): `stale`
+    приходит с кодом 200, и без разбора тела сигнал теряется. Пустой словарь
+    при любой неразобранной форме: отсутствие сигнала не должно становиться
+    ошибкой разбора, иначе новая форма тела погасила бы probe целиком.
     """
     try:
         response = await client.get(_deep_health_url())
     except httpx.HTTPError as error:
-        return False, type(error).__name__
+        return False, type(error).__name__, {}
     if response.status_code != 200:
-        return False, f"http_{response.status_code}"
-    return True, ""
+        return False, f"http_{response.status_code}", {}
+    try:
+        payload = response.json()
+    except ValueError:
+        return True, "", {}
+    if not isinstance(payload, dict):
+        return True, "", {}
+    checks = payload.get("checks")
+    return True, "", checks if isinstance(checks, dict) else {}
+
+
+async def _check_backup(
+    checks: dict[str, object],
+    redis: Redis,
+    *,
+    client: httpx.AsyncClient | None,
+    started: float,
+) -> None:
+    """AC-4 стори 11.10: `checks.backup == 'stale'` → алерт с отдельным ключом.
+
+    **Почему `stale`, а не любое значение кроме `ok`.** `fail:...` означает
+    «S3 недоступен» — инцидент хранилища, и о нём уже кричит `checks.db`/
+    `checks.redis`-подобная диагностика в логе api. Смешивать два класса
+    отказов в один алерт значило бы послать дежурного проверять cron, когда
+    легло хранилище.
+
+    **Почему молчание при `fail`.** Алерт о недоступности S3 потребовал бы
+    своего порога и своего ключа; в этой стори такого требования нет (AC-4
+    говорит только про «бэкап не выполнялся»). Молчание здесь намеренное и
+    ограничено: `fail` уже виден в `checks` на живом `/health/deep`.
+    """
+    backup_status = checks.get("backup")
+    if backup_status != "stale":
+        return
+    await send_alert(
+        f"env={settings.env} check=backup status=stale"
+        f" duration_ms={int((time.monotonic() - started) * 1000)}",
+        key=BACKUP_ALERT_KEY,
+        redis=redis,
+        client=client,
+    )
 
 
 async def run_once(redis: Redis, *, client: httpx.AsyncClient | None = None) -> bool:
@@ -86,13 +145,17 @@ async def run_once(redis: Redis, *, client: httpx.AsyncClient | None = None) -> 
     own_client = client is None
     http_client = client if client is not None else httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS)
     try:
-        healthy, error_type = await _probe(http_client)
+        healthy, error_type, checks = await _probe(http_client)
     finally:
         if own_client:
             await http_client.aclose()
 
     if healthy:
         await register_success(redis)
+        # AC-4 стори 11.10: `backup` проверяется только на здоровом ответе.
+        # При `503` тело содержит диагноз отказа, и алерт о бэкапе был бы
+        # вторым сообщением об одном инциденте.
+        await _check_backup(checks, redis, client=client, started=started)
         logger.info(
             "health.probe.ok",
             duration_ms=int((time.monotonic() - started) * 1000),

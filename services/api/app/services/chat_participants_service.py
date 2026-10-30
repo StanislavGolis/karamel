@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.chats import ChatRepository
 from app.repositories.profile_photos import ProfilePhotoRepository
+from app.services.age_service import compute_age, today_or_now
 from app.services.event_card_service import (
     CardFeedItem,
     CardNotFoundError,
@@ -120,7 +121,7 @@ async def list_card_participants(
     *,
     viewer_id: int,
     card_uuid: uuid_lib.UUID,
-    viewer_community_slug: str,
+    viewer_city_slug: str,
     settings: ParticipantsSettings,
 ) -> CardParticipants:
     """AC-01…AC-05: состав компании для её участника.
@@ -154,7 +155,7 @@ async def list_card_participants(
             # AC-05 стори 10.1: срез сообщества — колонка зрителя, не конфиг.
             # Здесь зритель — участник/заявитель карточки, его слаг уже прочитан
             # выше по коду (тот же пользователь, что и `viewer_id`).
-            viewer_community_slug=viewer_community_slug,
+            viewer_city_slug=viewer_city_slug,
             settings=settings,
         )
     except CardNotFoundError as error:
@@ -173,7 +174,7 @@ async def list_card_participants(
         # задача — не дать времени ответа зависеть от существования карточки.
         await ChatRepository(session).list_participants(
             card_id=_MISSING_CARD_ID,
-            community_slug=settings.default_community_slug,
+            city_slug=settings.default_city_slug,
         )
         raise ParticipantsNotFoundError() from error
 
@@ -186,7 +187,7 @@ async def list_card_participants(
 
     rows = await ChatRepository(session).list_participants(
         card_id=card.card.id,
-        community_slug=settings.default_community_slug,
+        city_slug=settings.default_city_slug,
     )
 
     # AC-05 (NFR7): фото — ОДИН запрос на автора и всех участников.
@@ -199,6 +200,8 @@ async def list_card_participants(
         CompanyMember(
             user_uuid=card.author_uuid,
             name=card.author_name,
+            # Стори 12.2, AC-3: возраст автора уже вычислен в `get_card`
+            # (`compute_age` по `birth_date` с fallback на legacy-`age`).
             age=card.author_age,
             is_author=True,
             photo_url=signed.get(card.card.author_id),
@@ -211,12 +214,16 @@ async def list_card_participants(
         CompanyMember(
             user_uuid=user_uuid,
             name=name,
-            age=age,
+            age=compute_age(birth_date, age, today_or_now()),
             is_author=False,
             photo_url=signed.get(user_id),
             photo_expires_in=ttl if user_id in signed else None,
         )
-        for user_id, user_uuid, name, age, _submitted_at in rows
+        # Стори 12.2, AC-3: наружу — вычисленный возраст. `birth_date`
+        # (последний элемент кортежа) приоритетнее legacy-`age`: у новых
+        # учёток колонка `age` — `NULL`, и прямое чтение отдавало бы `null`
+        # всем участникам, заполнившим дату рождения.
+        for user_id, user_uuid, name, age, _submitted_at, birth_date in rows
     )
 
     logger.info(

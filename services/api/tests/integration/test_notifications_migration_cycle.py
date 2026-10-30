@@ -31,11 +31,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from alembic import command
+from tests.conftest import HEAD_REVISION
 
 pytestmark = [
     pytest.mark.integration,
+    # Стори 12.9 (AC-4, W-11.4-d): DDL на общей схеме — несовместим с xdist.
+    pytest.mark.ddl,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
+
 
 API_ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,9 +63,12 @@ _INSERT_USER = (
 )
 _INSERT_USER_HEAD = (
     "INSERT INTO users (provider, provider_user_id, phone, role, gender, status, "
-    "community_slug) "
+    "city_slug) "
     "VALUES ('phone', :p, :p, 'user', 'female', 'active', 'tomsk') RETURNING id"
 )
+# Стори 12.1: используется ТОЛЬКО в тесте backfill, который снимает схему до
+# `0020` — там колонка называется `community_slug` (переименование делает
+# `0035`). Для схемы-головы есть `_INSERT_USER_HEAD`.
 _INSERT_PLACE = (
     "INSERT INTO places (name, category, address_text, community_slug, is_active) "
     "VALUES ('B', 'cafe', 'A', 'tomsk', true) RETURNING id"
@@ -228,7 +235,7 @@ def test_single_head_and_down_revision() -> None:
     # Сравнение с ТЕКУЩЕЙ вершиной, а не «тестом номера»: собственная связка
     # `0021 -> 0020` проверяется ниже и от номера вершины не зависит.
     # Стори 10.2: вершина — `0033` (индекс удаления).
-    assert _heads() == ("0033",)
+    assert _heads() == (HEAD_REVISION,)
     assert _down_revision_of_0021() == "0020"
     assert _down_revision_of("0022") == "0021"
     assert _down_revision_of("0023") == "0022"
@@ -426,7 +433,7 @@ def test_downgrade_guard_keeps_rows() -> None:
     # Сравнение с ТЕКУЩЕЙ вершиной, а не «тестом номера»: собственная связка
     # `0021 -> 0020` проверяется ниже и от номера вершины не зависит.
     # Стори 10.2: вершина — `0033` (индекс удаления).
-    assert _heads() == ("0033",)
+    assert _heads() == (HEAD_REVISION,)
 
 
 # ——— D-TD-1: backfill ——————————————————————————————————————————

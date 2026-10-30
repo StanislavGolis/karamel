@@ -2,7 +2,7 @@
 
 §18.2: ассерт обязан падать от реальной правки. Проверяется именно SQL, потому
 что часть условий не наблюдаема через HTTP: `FOR UPDATE` на `users` виден
-только по количеству вставок в гонке, а срез `community_slug` — по совпадению
+только по количеству вставок в гонке, а срез `city_slug` — по совпадению
 тела `404` с несуществующей карточкой (косвенно).
 """
 
@@ -70,17 +70,17 @@ def test_active_count_statement_counts_only_pending() -> None:
     assert "'selected'" not in sql
 
 
-def test_get_for_request_statement_has_community_slice_and_no_lock() -> None:
+def test_get_for_request_statement_has_city_slice_and_no_lock() -> None:
     """AC-07 + D-5a.2-3: срез сообщества есть, `FOR UPDATE` нет.
 
-    Краснеет двумя правками: (1) убрать `community_slug` — карточка чужого
+    Краснеет двумя правками: (1) убрать `city_slug` — карточка чужого
     сообщества стала бы доступна (утечка, ADR-13); (2) добавить
     `.with_for_update()` — 5а.2 начала бы блокировать `event_cards`, нарушив
     порядок ADR-09 и создав дедлок с 4.4.
     """
     sql = _sql(JoinRequestRepository.build_get_for_request_statement(CARD_UUID, COMMUNITY))
     assert "FROM event_cards" in sql
-    assert "community_slug" in sql
+    assert "city_slug" in sql
     assert COMMUNITY in sql
     assert "FOR UPDATE" not in sql
 

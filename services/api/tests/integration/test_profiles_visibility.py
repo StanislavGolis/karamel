@@ -1,5 +1,6 @@
 """Видимость анкет по городу пилота (Task 4.1–4.2, 5.1–5.4; AC-01, AC-02, AC-03, AC-05).
 
+
 Реальный PostgreSQL, схема через Alembic. Проверяется не только набор `uuid`,
 но и то, что регистрация в чужом городе не ломается (AC-02: FR16 ограничивает
 показ, а не регистрацию).
@@ -11,6 +12,7 @@
 import os
 import uuid as uuid_lib
 from collections.abc import AsyncIterator
+from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -95,7 +97,10 @@ async def _profile(
         **(
             {
                 "name": "Аня" if gender == "female" else "Иван",
-                "age": 30,
+                # Стори 12.2: сырой INSERT требует объект `date` — asyncpg
+                # не приводит строку к типу колонки (`'str' has no attribute
+                # 'toordinal'`). Строка допустима только в HTTP-payload.
+                "birth_date": date(1994, 3, 14),
                 "bio": "текст",
             }
             if text_fields
@@ -198,7 +203,12 @@ async def test_create_in_other_city_succeeds_and_stays_invisible(
 
     created = await client.post(
         "/api/v1/profiles",
-        json={"name": "Аня", "city": OTHER, "age": 32, "bio": "люблю горы"},
+        json={
+            "name": "Аня",
+            "city": OTHER,
+            "birth_date": "1994-03-14",
+            "bio": "люблю горы",
+        },
         cookies={ACCESS_COOKIE_NAME: token},
     )
 

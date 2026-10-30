@@ -36,8 +36,8 @@ pytestmark = [
 ]
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 class _NoLimit:
@@ -74,10 +74,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession, *, slug: str | None = None) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug or _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": slug or _city()},
     )
     return int(row.scalar_one())
 
@@ -89,21 +89,22 @@ async def _insert_card(
     place_id: int,
     status: str = "published",
     capacity: int = 1,
-    community_slug: str | None = None,
+    city_slug: str | None = None,
 ) -> str:
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, "
-            "60, :expires, :status, 0, 'approved', :published_at) RETURNING uuid"
+            "60, :expires, :status, 0, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": community_slug or _community(),
+            "slug": city_slug or _city(),
             "starts": starts,
             "capacity": capacity,
             "expires": starts - timedelta(hours=1),
@@ -157,6 +158,7 @@ async def test_cancel_pending_returns_204_and_sets_cancelled(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-01: `204`, статус `cancelled`, `decided_at` заполнен.
+    П7 (FR77): заявку можно отменить; отмена освобождает слот и разрешает повтор.
 
     Краснеет, если убрать `decided_at` из `SET`: заявка вышла из `pending`,
     а момента решения нет (D-5a.1-6).
@@ -271,7 +273,7 @@ async def test_foreign_request_is_indistinguishable_from_missing(
     assert (await _request_row(session, request_uuid))["status"] == "pending"
 
 
-async def test_foreign_community_request_is_not_cancellable(
+async def test_foreign_city_request_is_not_cancellable(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-04 (ADR-13): заявка на карточку чужого сообщества — `404`.
@@ -283,7 +285,7 @@ async def test_foreign_community_request_is_not_cancellable(
     applicant, token = await _new_user(session)
     place_id = await _place(session, slug="other-city")
     card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place_id, community_slug="other-city"
+        session, author_id=author.id, place_id=place_id, city_slug="other-city"
     )
     card_row = await session.execute(
         text("SELECT id FROM event_cards WHERE uuid = :uuid"), {"uuid": card_uuid}

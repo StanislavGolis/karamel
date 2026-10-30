@@ -467,7 +467,7 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
             await loadPage(cursor, true);
             setLoadingMore(false);
           }}
-          className="min-h-11 self-start rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface disabled:opacity-60"
+          className="min-h-11 self-start rounded-md border border-border px-4 py-2 text-sm font-medium text-ink hover:bg-surface-hover disabled:opacity-60"
         >
           {loadingMore ? "Загружаем…" : "Показать ещё"}
         </button>
@@ -517,7 +517,7 @@ export function ChatScreen({ chatUuid, viewerUuid, wsUrl }: ChatScreenProps) {
               type="button"
               onClick={() => void send()}
               disabled={sending || !draft.trim()}
-              className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface disabled:opacity-60"
+              className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
             >
               Повторить
             </button>

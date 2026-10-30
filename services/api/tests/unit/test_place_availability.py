@@ -3,7 +3,7 @@
 Два уровня проверки:
 
 1. ТЕКСТ SQL статического билдера — без БД (§18.2). Проверяется наличие
-   трёх условий (`uuid`, `is_active`, `community_slug`) и отсутствие
+   трёх условий (`uuid`, `is_active`, `city_slug`) и отсутствие
    `ORDER BY`/`LIMIT`: это проверка существования, а не выборка.
 2. ПОВЕДЕНИЕ сервиса через подменённый репозиторий — обе ветки без БД.
 
@@ -37,9 +37,9 @@ class _StubRepository:
         self.calls: list[dict[str, Any]] = []
 
     async def is_available_for_card(
-        self, *, place_uuid: uuid_lib.UUID, community_slug: str
+        self, *, place_uuid: uuid_lib.UUID, city_slug: str
     ) -> bool:
-        self.calls.append({"place_uuid": place_uuid, "community_slug": community_slug})
+        self.calls.append({"place_uuid": place_uuid, "city_slug": city_slug})
         return self._available
 
 
@@ -48,11 +48,11 @@ def test_availability_statement_checks_all_three_conditions() -> None:
 
     Краснеет от любой из трёх правок:
     - убрать `is_active` → скрытое место примет новую карточку (FR68 нарушен);
-    - убрать `community_slug` → карточка Томска сошлётся на кемеровское кафе;
+    - убрать `city_slug` → карточка Томска сошлётся на кемеровское кафе;
     - убрать `uuid` → условие перестанет отбирать конкретное место.
     """
     statement = PlaceRepository.build_availability_statement(
-        place_uuid=PLACE_UUID, community_slug="tomsk"
+        place_uuid=PLACE_UUID, city_slug="tomsk"
     )
     # CR 4.1: `whereclause`, а НЕ `str(statement)`. `select(Place)` выбирает все
     # колонки модели, поэтому `places.is_active` есть в SELECT-списке ВСЕГДА, и
@@ -63,7 +63,7 @@ def test_availability_statement_checks_all_three_conditions() -> None:
 
     assert "places.uuid" in where
     assert "places.is_active" in where
-    assert "places.community_slug" in where
+    assert "places.city_slug" in where
 
 
 def test_availability_statement_has_no_ordering_or_limit() -> None:
@@ -76,7 +76,7 @@ def test_availability_statement_has_no_ordering_or_limit() -> None:
     не должны слиться обратно.
     """
     statement = PlaceRepository.build_availability_statement(
-        place_uuid=PLACE_UUID, community_slug="tomsk"
+        place_uuid=PLACE_UUID, city_slug="tomsk"
     )
     sql = str(statement)
 
@@ -98,7 +98,7 @@ async def test_unavailable_place_raises_domain_error() -> None:
         await ensure_place_available(
             None,  # type: ignore[arg-type]
             place_uuid=PLACE_UUID,
-            community_slug="tomsk",
+            city_slug="tomsk",
             repository=repository,  # type: ignore[arg-type]
         )
 
@@ -133,8 +133,8 @@ async def test_available_place_does_not_raise() -> None:
     await ensure_place_available(
         None,  # type: ignore[arg-type]
         place_uuid=PLACE_UUID,
-        community_slug="tomsk",
+        city_slug="tomsk",
         repository=repository,  # type: ignore[arg-type]
     )
 
-    assert repository.calls == [{"place_uuid": PLACE_UUID, "community_slug": "tomsk"}]
+    assert repository.calls == [{"place_uuid": PLACE_UUID, "city_slug": "tomsk"}]

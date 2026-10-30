@@ -49,8 +49,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TimestampMixin
 from app.models.enums import (
     FEED_STATUSES,
+    Activity,
+    CardKind,
     CardVerificationStatus,
     EventCardStatus,
+    Gender,
     PlaceCategory,
 )
 
@@ -65,6 +68,32 @@ CARD_MIN_CAPACITY = 1
 CARD_MAX_CAPACITY = 6
 CARD_MIN_DECISION_WINDOW_MINUTES = 15
 CARD_MAX_DECISION_WINDOW_MINUTES = 10_080
+# AC-1 стори 12.4 (ADR-20): ширина колонок типа и активности. Дублируется
+# в `String(...)` осознанно: `CREATE TABLE` и `ALTER TABLE` берут одно значение,
+# а схема Pydantic отбивает слишком длинное до БД (иначе `500` вместо `422`).
+CARD_KIND_MAX_LENGTH = 16
+CARD_ACTIVITY_MAX_LENGTH = 32
+
+
+def has_audience_bounds_values(
+    *, gender_filter: str | None, age_min: int | None, age_max: int | None
+) -> bool:
+    """AC-1a стори 12.6: задана ли ХОТЬ ОДНА рамка аудитории (CR 12.6 H-6).
+
+    **Одно место правила.** До фикса то же условие было скопировано строкой в
+    `card_decision_service.close_due_card` («`gender_filter is not None or
+    age_min is not None or age_max is not None`»), и копия уже дала дефект
+    H-2: модель знала про режим заявок, а копия в ветке — нет. Ровно поэтому
+    правило живёт здесь, а сервис спрашивает его, а не повторяет.
+
+    Принимает ЗНАЧЕНИЯ, а не ORM-объект: ядро автовыбора получает рамки
+    кортежем из `decision_state` (скалярный `SELECT`, без материализации
+    объекта) — иначе на горячем пути воркера понадобилось бы второе чтение.
+
+    Именно «хоть одна», а не «обе границы»: полуоткрытые пары легальны
+    (AC-1a), и карточка «ищу от 30» — карточка с рамками.
+    """
+    return gender_filter is not None or age_min is not None or age_max is not None
 
 
 def _in_clause(column: str, values: tuple[str, ...]) -> str:
@@ -119,8 +148,8 @@ class EventCard(TimestampMixin, Base):
     )
     # AC-06, ADR-01: срез сообщества — колонка-строка, FK на `communities` нет
     # (таблицы не существует). Значение сверяет сервис 4.2 с
-    # `Settings.community_slugs`; CHECK держит форму для вставок вне ORM.
-    community_slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    # `Settings.city_slugs`; CHECK держит форму для вставок вне ORM.
+    city_slug: Mapped[str] = mapped_column(String(64), nullable=False)
     # AC-01: «что». Предел 100 — карточка показывается в ленте одной строкой.
     title: Mapped[str] = mapped_column(String(100), nullable=False)
     # AC-01: «описание». NULL допустим — карточка без описания легальна.
@@ -132,6 +161,34 @@ class EventCard(TimestampMixin, Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     # AC-01, FR70: вместимость 1..6; режим определяется этим значением.
     capacity: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    # AC-1 стори 12.4 (FR117, ADR-20): ТИП встречи, выбранный автором явно.
+    # НЕ выводится из `capacity`: вместимость — механика присоединения,
+    # тип — смысл встречи. Ограничения на связку полей нет и быть не должно
+    # (AC-4: карточка `capacity=1` + `kind='company'` легальна).
+    kind: Mapped[str] = mapped_column(String(CARD_KIND_MAX_LENGTH), nullable=False)
+    # AC-1 стори 12.4 (FR118, ADR-20): активность из белого списка.
+    # `other` — легаси-значение миграции `0037`; на вход не принимается
+    # (см. `ACTIVITY_INPUT_VALUES`), но в БД существует у старых карточек.
+    activity: Mapped[str] = mapped_column(String(CARD_ACTIVITY_MAX_LENGTH), nullable=False)
+    # AC-1 стори 12.6 (FR119, ADR-19): рамки аудитории. МЯГКИЙ фильтр —
+    # карточка видна всем, заявку подать может любой (FR81 не трогаем).
+    # NULL = рамка не задана: `gender_filter` — «любой пол», `age_min` —
+    # «без нижней границы», `age_max` — «без верхней».
+    #
+    # Колонки NULL-able осознанно (AC-1a): полуоткрытые пары легальны
+    # («ищу от 30, без верхней границы»), поэтому CHECK `age_min <= age_max`
+    # не запрещает NULL в одной из границ — SQL даёт `NULL <= 5 → NULL`,
+    # а CHECK пропускает `NULL` как «не FALSE». Ужесточение до «обе или ни
+    # одной» было бы новым требованием.
+    #
+    # `gender_filter` объявлен `String(16)` + CHECK, а не нативным PG-enum:
+    # прецедент `kind`/`activity` (`0037`) — `ALTER TYPE ... ADD VALUE`
+    # не откатывается транзакционно, CHECK переписывается одной миграцией.
+    # Значение сравнивается с `profiles.gender` (NOT NULL + составной FK),
+    # других источников пола нет.
+    gender_filter: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    age_min: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    age_max: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     # AC-01, FR79: окно решения в минутах. Для режима «заявки» обязательно,
     # для открытого набора приходит из конфига (OQ-1: 2880 = 48 ч).
     decision_window_minutes: Mapped[int] = mapped_column(SmallInteger, nullable=False)
@@ -184,6 +241,25 @@ class EventCard(TimestampMixin, Base):
     # однозначность: две карточки не могут делить чат, а `NULL` не занимает
     # индекс — открытые карточки его не касаются.
     chat_uuid: Mapped[uuid_lib.UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    # CR 12.6 H-1/H-3 (миграция `0039`): маркер «рамки отсекли всех».
+    #
+    # AC-5 требует, чтобы карточка осталась `published` (заявки живы, автор
+    # вправе снять рамку), поэтому терминального статуса здесь быть не может.
+    # Но предикат воркера (`status='published' AND expires_at <= now`) тогда
+    # совпадает с карточкой ВЕЧНО: замер CR показал повтор `skipped: 1` на
+    # каждом прогоне и `count_overdue_windows == 1` — ложный алерт «воркер
+    # лежит» каждый час на здоровом воркере (класс H-1 из CR 11.8).
+    #
+    # Маркер — дедупликация без смены статуса: помеченные карточки не попадают
+    # ни в `due_decision_ids` (повтор + голодание очереди, H-3: зависшая
+    # карточка имеет самый старый `expires_at` и стояла в голове
+    # `order_by(expires_at, id).limit(N)`), ни в `count_overdue_windows`
+    # (ложный алерт).
+    #
+    # Снимается сам, когда появляется шанс на решение: автор изменил рамки
+    # (`update_card`) или на карточку подана новая заявка
+    # (`submit_join_request`). `NULL` = «рамки никого не отсекали».
+    audience_skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # AC-03 (FR70): режим вычисляется из вместимости. Отдельного столбца нет
     # намеренно — иначе `capacity=1` и «открытый набор» могли бы сосуществовать
@@ -192,6 +268,22 @@ class EventCard(TimestampMixin, Base):
     def is_request_mode(self) -> bool:
         """`True` — режим «заявки» (вместимость 1), `False` — открытый набор."""
         return self.capacity == CARD_REQUEST_MODE_CAPACITY
+
+    @property
+    def has_audience_bounds(self) -> bool:
+        """AC-1a стори 12.6: задана ли ХОТЬ ОДНА рамка аудитории.
+
+        Делегирует модульной `has_audience_bounds_values` — CR 12.6 H-6:
+        до фикса то же правило было скопировано в `card_decision_service:207`
+        отдельным `gender_filter is not None or age_min is not None or ...`,
+        и две копии одного правила уже дали дефект H-2 (модель знала про
+        режим заявок, а копия в ветке — нет). Один источник — один риск.
+        """
+        return has_audience_bounds_values(
+            gender_filter=self.gender_filter,
+            age_min=self.age_min,
+            age_max=self.age_max,
+        )
 
     __table_args__ = (
         # AC-01: `PrimaryKeyConstraint` объявлен явно, чтобы имя строилось по
@@ -222,6 +314,33 @@ class EventCard(TimestampMixin, Base):
         ),
         # AC-06, ADR-12: категория — тот же список, что у `places.category`.
         CheckConstraint(_in_clause("category", tuple(PlaceCategory)), name="category"),
+        # AC-1 стори 12.4 (FR117, ADR-20): тип встречи — только `CardKind`.
+        # Список собирается из StrEnum, а не строкой: добавление значения
+        # в enum без этой строки дало бы статус, прошедший Pydantic, но
+        # отвергнутый PostgreSQL (класс дефекта, о котором предупреждает
+        # докстринг `_in_clause`).
+        CheckConstraint(_in_clause("kind", tuple(CardKind)), name="kind"),
+        # AC-1 стори 12.4 (FR118, ADR-20): активность — `Activity` ЦЕЛИКОМ,
+        # включая легаси `other`. Граница «вход ≠ БД» держится валидаторами
+        # схем, а не ограничением: запрет `other` здесь сделал бы миграцию
+        # `0037` невыполнимой (бэкфилл старых строк).
+        CheckConstraint(_in_clause("activity", tuple(Activity)), name="activity"),
+        # AC-1a стори 12.6 (FR119, ADR-19): порядок границ возраста. CHECK
+        # срабатывает только когда ОБЕ границы заданы — `NULL` в сравнении даёт
+        # `NULL`, а PostgreSQL считает такую проверку пройденной. Полуоткрытые
+        # пары (`30/NULL`, `NULL/35`) легальны осознанно: «ищу от 30, без
+        # верхней границы» — законный запрос автора. Замок — ПАРА тестов
+        # (P-21): `40/30` → `IntegrityError`, `30/NULL` → успех. Один тест
+        # не отличит настоящий CHECK от `CHECK (TRUE)`.
+        CheckConstraint("age_min <= age_max", name="age_range"),
+        # AC-1b: пол рамки — `Gender` или NULL (рамка не задана).
+        # `gender_filter IS NULL` обязателен в предикате: без него CHECK
+        # отверг бы каждую карточку, где пол не указан, — то есть все
+        # существующие (мутация U3).
+        CheckConstraint(
+            f"gender_filter IS NULL OR {_in_clause('gender_filter', tuple(Gender))}",
+            name="gender_filter",
+        ),
         # AC-01, FR70: вместимость 1..6. Верхняя граница — продуктовый предел
         # компании (2–6 человек, FR85), нижняя — режим заявок.
         CheckConstraint(
@@ -245,7 +364,7 @@ class EventCard(TimestampMixin, Base):
         # AC-06, ADR-01: тот же шаблон слага, что у `places` и в конфиге.
         # Три копии намеренно: конфиг проверяет `.env` до подключения к БД,
         # CHECK держит инвариант для всех путей записи.
-        CheckConstraint("community_slug ~ '^[a-z0-9_-]{3,64}$'", name="community_slug"),
+        CheckConstraint("city_slug ~ '^[a-z0-9_-]{3,64}$'", name="city_slug"),
         # AC-05, ADR-02: опубликованная карточка обязана иметь момент публикации.
         # Иначе `expires_at` нечем объяснить, а лента (4.5) не может показать
         # «опубликовано тогда-то».
@@ -305,17 +424,17 @@ class EventCard(TimestampMixin, Base):
         Index("ix_event_cards_place_id", "place_id"),
         # AC-07: лента (4.5) сортирует по `starts_at` в срезе сообщества
         # и фильтрует по статусу. Порядок колонок: равенство → сортировка →
-        # фильтр (тот же принцип, что у `ix_places_community_active`).
-        Index("ix_event_cards_community_starts", "community_slug", "starts_at", "status"),
+        # фильтр (тот же принцип, что у `ix_places_city_active`).
+        Index("ix_event_cards_city_starts", "city_slug", "starts_at", "status"),
         # Стори 6.1 (AC-06, долг X-5b.1-1): предикат окна ленты. Лента
         # фильтрует `status IN FEED_STATUSES` (published/full) и сортирует
-        # `(starts_at, uuid)`. Существующий `ix_event_cards_community_starts`
+        # `(starts_at, uuid)`. Существующий `ix_event_cards_city_starts`
         # НЕ покрывает: `status` стоит третьей колонкой, а нужен предикат
         # (иначе в индекс попадают архивные карточки) и `uuid` в порядке
         # (иначе `Sort` в памяти на каждой странице).
         Index(
             "ix_event_cards_feed_visible",
-            "community_slug",
+            "city_slug",
             "starts_at",
             "uuid",
             # CR 6.1 (находка 7): предикат собирается из доменной константы,

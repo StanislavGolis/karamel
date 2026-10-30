@@ -57,7 +57,7 @@ PLACE_NOTHING_TO_UPDATE_CODE = "place_nothing_to_update"
 # QD A4 (R-05): попытка перенести место в другое сообщество. Поле убрано из
 # `PlaceUpdate`, но редизайн формы или старый клиент могут его прислать;
 # ответ обязан говорить «перенос запрещён», а не «сломанная форма».
-PLACE_COMMUNITY_IMMUTABLE_CODE = "place_community_immutable"
+PLACE_CITY_IMMUTABLE_CODE = "place_city_immutable"
 PLACE_UNKNOWN_COMMUNITY_CODE = "PLACE_UNKNOWN_COMMUNITY"
 # CR 3.1, патч 2: код категории — машинный идентификатор (snake_case, как все
 # прочие коды проекта). Перечень допустимых значений едет отдельным полем
@@ -71,7 +71,7 @@ class PlaceDuplicateError(Exception):
 
     `409`, а не `422`: запрос синтаксически верен, конфликт в состоянии
     ресурса. Два пути ведут к этой ошибке — дешёвая проверка
-    `exists_in_community` и `IntegrityError` от `uq_places_community_name`
+    `exists_in_city` и `IntegrityError` от `uq_places_city_name`
     (гонка двух вставок). Обе дают один и тот же код.
     """
 
@@ -81,7 +81,7 @@ class PlaceDuplicateError(Exception):
 class PlaceArchivedError(Exception):
     """AC-03, D-6: имя занято СКРЫТЫМ местом этого же сообщества.
 
-    `uq_places_community_name` не включает `is_active` (R-02: миграция `0007`
+    `uq_places_city_name` не включает `is_active` (R-02: миграция `0007`
     не меняется), поэтому скрытое место продолжает держать своё имя. Отдавать
     на это `PLACE_DUPLICATE` нельзя: админ получил бы «такое место уже есть»
     про место, которого нет в выдаче, и не понял бы, что делать. `PLACE_ARCHIVED`
@@ -102,7 +102,7 @@ class PlaceUnknownCommunityError(Exception):
     """AC-03, ADR-01 «отвергнуто (б)»: слаг есть, но такого сообщества нет в конфиге.
 
     Без этой ошибки опечатка (`tomsk1`) создаёт место в «невидимом
-    сообществе»: строка есть, `WHERE community_slug = 'tomsk'` её не находит,
+    сообществе»: строка есть, `WHERE city_slug = 'tomsk'` её не находит,
     и лента пуста без единой ошибки в логах.
     """
 
@@ -231,18 +231,18 @@ class CommunitySettings(Protocol):
     """CR 3.1, патч 5: минимум настроек, нужный сервису.
 
     `Any` в сигнатуре отключал `mypy` на аргументе и пропускал строку:
-    при `settings.community_slugs = "tomsk"` проверка `slug in ...`
+    при `settings.city_slugs = "tomsk"` проверка `slug in ...`
     превращалась в поиск ПОДСТРОКИ (проверено: `"toms" in "tomsk"` → `True`),
     и место создавалось в несуществующем сообществе `toms`. Протокол ловит
     и это, и опечатку в имени атрибута.
     """
 
-    community_slugs: tuple[str, ...]
+    city_slugs: tuple[str, ...]
     # Task 4.2 стори 3.3 (AC-01): слаг выдачи берётся из конфига, параметра
     # в запросе нет (D-3). Поле объявлено в протоколе, а не прочитано
     # из глобальных настроек внутри функции: иначе unit-тест зависел бы
     # от `.env` разработчика, а сервис получил бы второй источник среза.
-    default_community_slug: str
+    default_city_slug: str
 
 
 async def create_place(
@@ -251,7 +251,7 @@ async def create_place(
     name: str,
     category: PlaceCategory | str,
     address_text: str,
-    community_slug: str,
+    city_slug: str,
     settings: CommunitySettings | None = None,
 ) -> Place:
     """AC-01…AC-04: создаёт место, соблюдая белый список и запрет дубля.
@@ -261,7 +261,7 @@ async def create_place(
     1. Нормализация `name`/`address_text` ДО любых проверок. Иначе дубль
        искался бы по сырому значению: `'Кафе „Прага“ '` не совпал бы
        с сохранённым `'Кафе „Прага“'`, проверка пропустила бы вставку,
-       и `uq_places_community_name` отбил бы её уже как `IntegrityError`.
+       и `uq_places_city_name` отбил бы её уже как `IntegrityError`.
     2. Сверка сообщества с конфигом (AC-03). Неизвестный слаг — ошибка,
        а не «создалось, но не видно».
     3. Проверка пустоты: строка из ZWSP имеет длину 1 и прошла бы
@@ -286,10 +286,10 @@ async def create_place(
     # mypy, но вызывающий код может прийти из нетипизированного места, а `in`
     # по строке — это поиск ПОДСТРОКИ (проверено: `"toms" in "tomsk"` → True),
     # то есть опечатка создала бы место в несуществующем сообществе `toms`.
-    if not isinstance(settings.community_slugs, (tuple, list)):
+    if not isinstance(settings.city_slugs, (tuple, list)):
         raise TypeError(
-            "settings.community_slugs должен быть последовательностью слагов, "
-            f"получено {type(settings.community_slugs).__name__}"
+            "settings.city_slugs должен быть последовательностью слагов, "
+            f"получено {type(settings.city_slugs).__name__}"
         )
 
     # Task 3.2 стори 3.2: правила полей — один хелпер на создание и правку.
@@ -301,8 +301,8 @@ async def create_place(
 
     # AC-03: сверка с конфигом в момент вызова, а не при импорте: список
     # сообществ меняется деплоем `.env` без пересборки кода (ADR-01).
-    if community_slug not in settings.community_slugs:
-        raise PlaceUnknownCommunityError(community_slug)
+    if city_slug not in settings.city_slugs:
+        raise PlaceUnknownCommunityError(city_slug)
 
     repository = PlaceRepository(session)
 
@@ -311,11 +311,11 @@ async def create_place(
     # успевает создать свою строку (§18.3).
     #
     # Стори 3.2 (AC-03, D-6): возвращается СТРОКА, а не факт существования.
-    # `uq_places_community_name` не включает `is_active` (R-02), поэтому скрытое
+    # `uq_places_city_name` не включает `is_active` (R-02), поэтому скрытое
     # место держит имя. Отдавать на это `PLACE_DUPLICATE` нельзя: админ увидел бы
     # «такое место уже есть» про место, которого нет в выдаче, и не нашёл бы
     # единственного действия — «восстановить».
-    conflicting = await repository.find_by_community_and_name(community_slug, normalized_name)
+    conflicting = await repository.find_by_city_and_name(city_slug, normalized_name)
     if conflicting is not None:
         if conflicting.is_active:
             raise PlaceDuplicateError(normalized_name)
@@ -325,7 +325,7 @@ async def create_place(
         name=normalized_name,
         category=normalized_category,
         address_text=normalized_address,
-        community_slug=community_slug,
+        city_slug=city_slug,
     )
 
     try:
@@ -340,7 +340,7 @@ async def create_place(
         if repository.is_duplicate_name_error(error):
             logger.info(
                 "place_duplicate_race",
-                community_slug=community_slug,
+                city_slug=city_slug,
                 name=normalized_name,
             )
             raise PlaceDuplicateError(normalized_name) from error
@@ -370,17 +370,17 @@ async def update_place(
        от значений, которые ОСТАНУТСЯ в строке: неприсланное поле берётся
        из самого места. Иначе правка категории нормализовала бы `None`
        и падала бы на пустом имени.
-    3. Поиск дубля — с исключением себя (`exists_in_community_excluding`).
+    3. Поиск дубля — с исключением себя (`exists_in_city_excluding`).
        Без исключения правка любого поля нашла бы САМО место по его же имени
        и отказывала бы `409` на легальном вводе.
-    4. Запись внутри SAVEPOINT: `IntegrityError` от `uq_places_community_name`
+    4. Запись внутри SAVEPOINT: `IntegrityError` от `uq_places_city_name`
        в гонке переводит транзакцию в aborted, и вызывающий слой не смог бы
        продолжить работу в той же транзакции.
 
     Скрытое чужое место даёт `PlaceArchivedError` с `existing_uuid` (D-6):
     `PLACE_DUPLICATE` про место, которого админ не видит в выдаче, бесполезен.
 
-    `community_slug` НЕ меняется (R-05): перенос между сообществами запрещён,
+    `city_slug` НЕ меняется (R-05): перенос между сообществами запрещён,
     поле отсутствует в `PlaceUpdate` и в наборе изменяемых полей.
     """
     mutable_fields = ("name", "category", "address_text", "is_active")
@@ -422,8 +422,8 @@ async def update_place(
     repository = PlaceRepository(session)
 
     # AC-05: дубль ищется только если имя реально меняется, и всегда без себя.
-    conflicting = await repository.exists_in_community_excluding(
-        place.community_slug, normalized_name, place.uuid
+    conflicting = await repository.exists_in_city_excluding(
+        place.city_slug, normalized_name, place.uuid
     )
     if conflicting is not None:
         if conflicting.is_active:
@@ -437,18 +437,18 @@ async def update_place(
     # с остальными путями (долг DS 2.4: часы приложения против часов БД).
 
     # CR 3.2, патч 6 (AC-03): слаг захватывается ДО `begin_nested()`. После
-    # отката SAVEPOINT объект экспирится, и обращение к `place.community_slug`
+    # отката SAVEPOINT объект экспирится, и обращение к `place.city_slug`
     # в `except`-ветке давало `MissingGreenlet` (ленивая подгрузка в async
     # вне greenlet-контекста) — то есть лог превращал `409 PLACE_DUPLICATE`
     # в `500`. Проверено исполнением: до патча гонка давала MissingGreenlet.
-    place_community_slug = place.community_slug
+    place_city_slug = place.city_slug
 
     try:
         # CR 3.2, патч 3 (AC-03, AC-07): присваивание ВНУТРИ `begin_nested()`.
         # До патча `place.name = ...` выполнялось до входа в SAVEPOINT, и первый
         # же `flush` внутри `begin_nested()` (а также autoflush на SELECT
         # проверки дубля) отправлял `UPDATE places SET name=...` ВНЕ SAVEPOINT.
-        # Тогда `IntegrityError` от `uq_places_community_name` в гонке откатывал
+        # Тогда `IntegrityError` от `uq_places_city_name` в гонке откатывал
         # не SAVEPOINT, а всю транзакцию, и вместо `409 PLACE_DUPLICATE` сессия
         # отдавала `PendingRollbackError` → `500` (доказано исполнением на
         # живом PostgreSQL 18: `UPDATE` в логе до `SAVEPOINT sa_savepoint_N`).
@@ -465,7 +465,7 @@ async def update_place(
         if repository.is_duplicate_name_error(error):
             logger.info(
                 "place_update_duplicate_race",
-                community_slug=place_community_slug,
+                city_slug=place_city_slug,
                 name=normalized_name,
             )
             raise PlaceDuplicateError(normalized_name) from error
@@ -519,9 +519,9 @@ async def list_places(
 
     Порядок шагов намеренный:
 
-    1. Слаг берётся из `settings.default_community_slug` (D-3): параметра
+    1. Слаг берётся из `settings.default_city_slug` (D-3): параметра
        в контракте нет, и клиент не может запросить чужое сообщество. Значение
-       сверяется с `community_slugs` — опечатка в `.env` иначе дала бы
+       сверяется с `city_slugs` — опечатка в `.env` иначе дала бы
        молча пустую ленту вместо ошибки конфигурации.
     2. Категория проходит белый список ДО запроса: `PlaceCategory` в схеме
        отбивает HTTP-вход, но воркер/импорт идут мимо Pydantic, и мусор
@@ -542,20 +542,20 @@ async def list_places(
         settings = global_settings
 
     # CR 3.1, патч 5b (повтор для выдачи): `in` по строке — поиск ПОДСТРОКИ,
-    # и `community_slugs = "tomsk"` пропустил бы слаг `toms`. Протокол ловит
+    # и `city_slugs = "tomsk"` пропустил бы слаг `toms`. Протокол ловит
     # это на mypy, рантайм-гард — на нетипизированном вызове.
-    if not isinstance(settings.community_slugs, (tuple, list)):
+    if not isinstance(settings.city_slugs, (tuple, list)):
         raise TypeError(
-            "settings.community_slugs должен быть последовательностью слагов, "
-            f"получено {type(settings.community_slugs).__name__}"
+            "settings.city_slugs должен быть последовательностью слагов, "
+            f"получено {type(settings.city_slugs).__name__}"
         )
 
-    community_slug = settings.default_community_slug
-    if community_slug not in settings.community_slugs:
-        # Конфиг обязан падать на старте (`_validate_community`), но сервис
+    city_slug = settings.default_city_slug
+    if city_slug not in settings.city_slugs:
+        # Конфиг обязан падать на старте (`_validate_city`), но сервис
         # не полагается на инвариант другой подсистемы: иначе выдача молча
         # пуста, и «в сообществе нет мест» неотличимо от «слаг не тот».
-        raise PlaceUnknownCommunityError(community_slug)
+        raise PlaceUnknownCommunityError(city_slug)
 
     normalized_category: str | None = None
     if category is not None:
@@ -580,7 +580,7 @@ async def list_places(
             raise PlaceCursorError() from error
 
     items, total = await PlaceRepository(session).list_page(
-        community_slug=community_slug,
+        city_slug=city_slug,
         category=normalized_category,
         include_inactive=include_inactive,
         after=after,

@@ -20,6 +20,7 @@ D-1: `POST` при существующем `draft` заполняет его (`
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -30,14 +31,13 @@ from app.models.profile import Profile
 from app.models.user import User
 from app.repositories.profiles import ProfileRepository
 from app.schemas.profile import (
-    AGE_MAX,
-    AGE_MIN,
     BIO_MAX,
     CITY_MAX,
     NAME_MAX,
     ProfileCreate,
     ProfileUpdate,
 )
+from app.services.age_service import today_or_now, validate_birth_date
 from app.services.consent_service import GenderRequiredError
 from app.services.profile_normalize import (
     normalize_bio,
@@ -149,14 +149,40 @@ def _check_text(field: str, value: str, *, required_code: str) -> str:
     return value
 
 
-def _check_age(age: int) -> int:
-    """AC-05: 18..99 — до БД, иначе CHECK даёт `IntegrityError` → `500`."""
-    if not AGE_MIN <= age <= AGE_MAX:
-        raise ProfileFieldError("invalid_age")
-    return age
+def _today_or_now(today: date | None) -> date:
+    """`today` — параметр ради детерминированной границы 18 лет (AC-6).
+
+    Значение по умолчанию берётся здесь, а не в сигнатурах вызывающих:
+    HTTP-слой не должен знать про "сегодня", иначе его пришлось бы
+    подменять в каждом тесте.
+
+    Стори 12.3 (Task 10, долг `W-12.2-b`): сам источник «сегодня» переехал в
+    `age_service.today_or_now()` — он же обслуживает остальные семь мест
+    вызова. Второй хелпер не создаётся: дубль решения разошёлся бы на границе
+    суток, и гард 18+ с сериализацией ответа посчитали бы разные числа.
+    """
+    return today_or_now() if today is None else today
 
 
-def _validate_and_normalize_create(payload: ProfileCreate, pilot_city: str) -> dict[str, Any]:
+def _check_birth_date(value: date, today: date | None = None) -> date:
+    """AC-2, AC-4: дата рождения проверяется ДО БД.
+
+    Иначе CHECK в БД дал бы `IntegrityError` → `500`, а несовершеннолетний
+    получил бы доступ, потому что 18+ больше не декларируется (`age_confirmed`).
+
+    Доменный код отказа (`underage` / `invalid_birth_date`) приходит из
+    `age_service` — там же живёт формула, чтобы веб-форма и API считали
+    возраст одинаково.
+    """
+    try:
+        return validate_birth_date(value, _today_or_now(today))
+    except ValueError as exc:
+        raise ProfileFieldError(str(exc)) from exc
+
+
+def _validate_and_normalize_create(
+    payload: ProfileCreate, pilot_city: str, *, today: date | None = None
+) -> dict[str, Any]:
     """Task 4.2 (AC-01, AC-04, AC-05): полное тело → нормализованные значения.
 
     Возвращает словарь ровно из четырёх полей: `gender`, `status`, `user_id`
@@ -174,14 +200,16 @@ def _validate_and_normalize_create(payload: ProfileCreate, pilot_city: str) -> d
         ),
         # AC-01: город обязателен и получает собственный код.
         "city": _check_text("city", city, required_code="city_required"),
-        "age": _check_age(payload.age),
+        "birth_date": _check_birth_date(payload.birth_date, today),
         "bio": _check_text(
             "bio", _normalize_field("bio", payload.bio, pilot_city), required_code="field_required"
         ),
     }
 
 
-def _validate_and_normalize_update(payload: ProfileUpdate, pilot_city: str) -> dict[str, Any]:
+def _validate_and_normalize_update(
+    payload: ProfileUpdate, pilot_city: str, *, today: date | None = None
+) -> dict[str, Any]:
     """Task 4.2, D-11: частичное тело → только реально переданные поля.
 
     Различие «не передано» и «передано `null`» делается через
@@ -193,15 +221,19 @@ def _validate_and_normalize_update(payload: ProfileUpdate, pilot_city: str) -> d
     Проверки те же, что при создании: `PATCH` — не обходной путь для лимитов.
     """
     result: dict[str, Any] = {}
-    for field in ("name", "city", "age", "bio"):
+    for field in ("name", "city", "birth_date", "bio"):
         if field not in payload.model_fields_set:
             continue
         raw = getattr(payload, field)
         if raw is None:
             # D-11: явный `null` — отказ, а не обнуление поля.
             raise ProfileFieldError("field_required")
-        if field == "age":
-            result[field] = _check_age(raw)
+        if field == "birth_date":
+            # Стори 12.2, VS-2: `birth_date` — единственное поле возраста.
+            # `age` не пишется вовсе: у старой учётки он остаётся как был,
+            # у новой — `NULL`. Записать вычисленное число значило бы вернуть
+            # второй источник правды (ADR-17, «Отвергнуто» а).
+            result[field] = _check_birth_date(raw, today)
             continue
         normalized = _normalize_field(field, raw, pilot_city)
         result[field] = _check_text(
@@ -218,6 +250,7 @@ def _compute_status(
     city: str | None,
     age: int | None,
     bio: str | None,
+    birth_date: date | None = None,
 ) -> str:
     """Task 4.3 (AC-02, AC-03, D-2): `complete` только при всех четырёх полях.
 
@@ -227,7 +260,11 @@ def _compute_status(
     могла бы прийти с `''`, и `status='complete'` дал бы пустую карточку.
     """
     filled = [name, city, bio]
-    if age is None:
+    # Стори 12.2, AC-5 (grandfathering): возраст есть из ЛЮБОГО источника.
+    # 40 008 старых учёток имеют `age` и не имеют `birth_date` — для них
+    # `complete` обязан сохраниться, иначе вход в продукт сломается у всех.
+    # Требовать именно `birth_date` значило бы отбросить их в `draft`.
+    if birth_date is None and age is None:
         return "draft"
     if any(not value for value in filled):
         return "draft"
@@ -248,6 +285,8 @@ async def create_profile(
     user: User,
     payload: ProfileCreate,
     pilot_city: str,
+    *,
+    today: date | None = None,
 ) -> tuple[Profile, bool]:
     """Task 4.4–4.6 (AC-02, D-1, D-4): создание или дозаполнение черновика.
 
@@ -264,7 +303,7 @@ async def create_profile(
     теоретически невозможен после consent, но проверка дешёвая: составной FK
     `(user_id, gender)` не примет `NULL`, и без неё получился бы `500`.
     """
-    values = _validate_and_normalize_create(payload, pilot_city)
+    values = _validate_and_normalize_create(payload, pilot_city, today=today)
 
     if user.gender is None:
         # D-4: без пола составной FK даст IntegrityError → 500.
@@ -283,10 +322,14 @@ async def create_profile(
     existing = await repository.get_by_user_id_for_update(user_id)
 
     if existing is not None:
-        return await _fill_draft(session, existing, values, gender=gender)
+        return await _fill_draft(session, existing, values, gender=gender, today=today)
 
     status = _compute_status(
-        name=values["name"], city=values["city"], age=values["age"], bio=values["bio"]
+        name=values["name"],
+        city=values["city"],
+        age=None,
+        birth_date=values["birth_date"],
+        bio=values["bio"],
     )
     try:
         profile = await repository.create(
@@ -310,7 +353,7 @@ async def create_profile(
         if raced is None:
             # Ошибка не была гонкой (например, нарушен другой CHECK) — не глотаем.
             raise
-        return await _fill_draft(session, raced, values, gender=gender)
+        return await _fill_draft(session, raced, values, gender=gender, today=today)
 
     # Server-дефолты (`uuid`, `created_at`, `updated_at`) заполняются БД;
     # `refresh` делает их доступными для сериализации ответа без MissingGreenlet.
@@ -324,6 +367,7 @@ async def _fill_draft(
     values: dict[str, Any],
     *,
     gender: str,
+    today: date | None = None,
 ) -> tuple[Profile, bool]:
     """D-1: заполняет существующую строку — `200`, `created=False`.
 
@@ -340,7 +384,13 @@ async def _fill_draft(
     for field, value in values.items():
         setattr(profile, field, value)
     profile.status = _compute_status(
-        name=values["name"], city=values["city"], age=values["age"], bio=values["bio"]
+        name=values["name"],
+        city=values["city"],
+        # AC-5: legacy-`age` у существующей строки не сбрасывается —
+        # учётка, заполнившая дату, сохраняет старый запасной источник.
+        age=profile.age,
+        birth_date=values["birth_date"],
+        bio=values["bio"],
     )
     # CR 2.3, Решение 3: дозаполнение черновика мужчиной тоже даёт скрытую
     # анкету — иначе флаг зависел бы от того, кто создал строку (2.2 — фото).
@@ -361,6 +411,8 @@ async def update_profile(
     user: User,
     payload: ProfileUpdate,
     pilot_city: str,
+    *,
+    today: date | None = None,
 ) -> Profile | None:
     """Task 4.5 (AC-03, D-6, D-8): частичная правка с блокировкой строки.
 
@@ -379,13 +431,17 @@ async def update_profile(
     if profile is None:
         return None
 
-    values = _validate_and_normalize_update(payload, pilot_city)
+    values = _validate_and_normalize_update(payload, pilot_city, today=today)
     for field, value in values.items():
         setattr(profile, field, value)
 
     # AC-03: `status` пересчитывается по факту заполнения всех четырёх полей.
     profile.status = _compute_status(
-        name=profile.name, city=profile.city, age=profile.age, bio=profile.bio
+        name=profile.name,
+        city=profile.city,
+        age=profile.age,
+        birth_date=profile.birth_date,
+        bio=profile.bio,
     )
     await session.flush()
     # AC-03: `updated_at` пересчитан БД — подтягиваем до отдачи в ответ,

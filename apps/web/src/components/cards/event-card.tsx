@@ -20,8 +20,27 @@ import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CountdownBadge } from "@/components/cards/countdown-badge";
+import { DeadlineNotice } from "@/components/cards/deadline-notice";
 import { SeatsIndicator } from "@/components/cards/seats-indicator";
+// Стори 12.6 (AC-2, Task 7.3): подпись рамок — из общего модуля,
+// чтобы форма и лента не разошлись в правиле (CR 12.6 H-6).
+import { audienceBoundsText } from "@/lib/audience-bounds";
+
+/**
+ * Стори 12.4 (AC-7, FR118): подписи занятий.
+ *
+ * Легаси `other` в словаре НЕТ намеренно: это «активность неизвестна»
+ * (значение миграции `0037`), а не седьмой вариант выбора. Карточка с ним
+ * покажет «Занятие не указано» — честнее, чем подставить «Кофе».
+ */
+const ACTIVITY_LABELS: Record<string, string> = {
+  coffee: "Кофе",
+  walk: "Прогулка",
+  bar: "Бар",
+  cinema: "Кино",
+  boardgames: "Настольные игры",
+  sport: "Спорт",
+};
 
 /** Форма карточки из `GET /api/v1/cards` (§7.2 архитектуры). */
 export type FeedCard = {
@@ -29,6 +48,14 @@ export type FeedCard = {
   title: string;
   description: string | null;
   category: string;
+  // Стори 12.4 (AC-7): смысл встречи виден до открытия карточки.
+  kind: "date" | "company";
+  activity: string;
+  // Стори 12.6 (AC-2, Task 7.3): рамки аудитории видны до подачи заявки.
+  // `null` — «рамка не задана», и тогда подпись не рисуется вовсе.
+  gender_filter: "female" | "male" | null;
+  age_min: number | null;
+  age_max: number | null;
   starts_at: string;
   expires_at: string;
   // AC-04 стори 5б.1 (NFR14): серверный якорь отсчёта окна решения.
@@ -57,6 +84,25 @@ export type FeedCard = {
    * («наблюдатель»).
    */
   viewer_participates?: boolean;
+  /**
+   * AC-2 стори 11.5 (FR82): на карточке режима заявок зритель подал заявку,
+   * и она ещё `pending`.
+   *
+   * Необязательное поле в типе, хотя сервер отдаёт его всегда: снимки
+   * ответов и тестовые данные до 11.5 поля не имеют, и обязательность
+   * сломала бы их без пользы — `false` здесь безопасное умолчание
+   * («заявки нет»), тот же приём, что у `viewer_participates`.
+   */
+  viewer_requested?: boolean;
+  /**
+   * AC-5 стори 11.5 (FR82): `uuid` своей заявки — адрес отмены
+   * (`DELETE /requests/{uuid}`).
+   *
+   * `null` при `viewer_requested=true` сервер не отдаёт (оба поля приходят
+   * одной строкой), но тип это допускает: клиент обязан не падать, а просто
+   * не показывать отмену, если адреса нет.
+   */
+  viewer_request_uuid?: string | null;
 };
 
 const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"] as const;
@@ -77,6 +123,40 @@ export function formatStartsAt(startsAt: string): string {
   const day = WEEKDAYS[date.getDay()];
   const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   return `${day[0].toUpperCase()}${day.slice(1)}, ${time}`;
+}
+
+/**
+ * «сегодня» / «завтра» / «через 2 дня» — статичная надпись (стори 12.5, AC-3).
+ *
+ * **Чистая функция от ДВУХ аргументов**, не от `Date.now()` внутри: иначе
+ * результат зависел бы от момента рендера, тест жил бы один день, а SSR и
+ * клиент разошлись бы в полночь. `now` приходит пропом из серверного
+ * `server_time` карточки — второго источника времени в интерфейсе нет (NFR14).
+ *
+ * Пересчитывается при загрузке (рендер), **не тикает** (З-9).
+ * Пустая строка — начало в прошлом: там надпись бессмысленна.
+ *
+ * Краснеет, если: порог «2 дня» заменить на «1 день» (U-13); брать `Date.now()`
+ * вместо `now`; вернуть пустую строку для будущего.
+ */
+export function formatRelativeDay(startsAt: string, now: string): string {
+  const target = new Date(startsAt);
+  const anchor = new Date(now);
+  if (Number.isNaN(target.getTime()) || Number.isNaN(anchor.getTime())) return "";
+
+  const diffMs = target.getTime() - anchor.getTime();
+  if (diffMs <= 0) return "";
+
+  const DAY_MS = 86_400_000;
+  // Календарные сутки, а не «24 часа»: встреча «завтра в 02:00» при якоре
+  // «сегодня 23:00» — это завтра, хотя разница 3 часа.
+  const startOfTarget = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+  const startOfAnchor = Date.UTC(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  const days = Math.round((startOfTarget - startOfAnchor) / DAY_MS);
+
+  if (days <= 0) return "";
+  if (days === 1) return "завтра";
+  return `через ${days} дня`;
 }
 
 /** «в субботу в 19:00» — для `aria-label`. */
@@ -141,7 +221,8 @@ type EventCardProps = {
    * §8.3: `offline` — полоса `warning` сверху.
    *
    * Чтение не блокируется (§8.4 п.5): показан последний известный кэш,
-   * ограничивается только запись — это делает `JoinRequestSheet`.
+   * блокируется только запись. Её рисует `JoinActions` на странице карточки,
+   * а не эта карточка ленты: здесь записи нет вовсе (стори 11.6).
    */
   offline?: boolean;
   /** §8.3: `stale` — «Обновляем…», кнопка остаётся активной. */
@@ -215,7 +296,8 @@ export function EventCard({ card, isOwn = false, loading = false, offline = fals
     <article className="overflow-hidden rounded-lg border border-border bg-surface">
       {/* §8.3: `offline` — полоса `warning` сверху. Чтение не блокируется
           (§8.4 п.5): человек видит последний известный кэш и понимает, что он
-          мог устареть. Запись блокирует `JoinRequestSheet`. */}
+          мог устареть. Запись блокируется на странице карточки (`JoinActions`),
+          а не здесь: в ленте записывающих действий нет (стори 11.6). */}
       {offline ? (
         <p className="bg-warning-tint px-4 py-2 text-sm font-medium text-warning">
           Нет связи. Показаны последние известные данные.
@@ -230,6 +312,14 @@ export function EventCard({ card, isOwn = false, loading = false, offline = fals
         <header className="flex items-start justify-between gap-3">
           <p className="text-lg font-semibold tracking-tight text-ink">
             {formatStartsAt(card.starts_at)}
+            {/* Стори 12.5, AC-3: статичная надпись «через N дней» — не тикает,
+                пересчитывается при загрузке. `now` — серверный `server_time`,
+                второго источника времени нет (NFR14, З-9). */}
+            {formatRelativeDay(card.starts_at, card.server_time) ? (
+              <span className="ml-2 text-sm font-normal text-ink-secondary">
+                {formatRelativeDay(card.starts_at, card.server_time)}
+              </span>
+            ) : null}
           </p>
           <span className="shrink-0 text-sm font-medium text-ink-secondary">
             {free > 0 ? (
@@ -252,8 +342,28 @@ export function EventCard({ card, isOwn = false, loading = false, offline = fals
 
         <p className="text-base font-medium text-ink">{card.title}</p>
 
+        {/* Стори 12.4 (AC-7, FR117/FR118): тип и занятие видны в ленте до
+            открытия карточки — «смысл встречи» перестаёт быть скрытым.
+            Текст, а не только цвет (NFR57). Легаси `other` показываем как
+            «Занятие не указано»: выдумывать содержание нельзя. */}
+        <p className="text-sm text-ink-secondary">
+          {card.kind === "date" ? "Свидание" : "Компания"}
+          {" · "}
+          {ACTIVITY_LABELS[card.activity] ?? "Занятие не указано"}
+        </p>
+
+        {/* Стори 12.6 (AC-2, Task 7.3, ADR-19): рамки видны ДО подачи заявки.
+            Показываем ТОЛЬКО если заданы (UX §1048): «ищу любого» — это
+            отсутствие ограничения, а не намерение автора, и писать его
+            вместо пустоты значило бы добавлять шум в каждую карточку.
+            Тон констатации, без «вы не подходите»: фильтр мягкий (FR81),
+            и признака «ты вне рамок» у заявителя нет (AC-4). */}
+        {audienceBoundsText(card) ? (
+          <p className="text-sm text-ink-secondary">{audienceBoundsText(card)}</p>
+        ) : null}
+
         {card.status === "published" && free > 0 ? (
-          <CountdownBadge expiresAt={card.expires_at} serverTime={card.server_time} />
+          <DeadlineNotice expiresAt={card.expires_at} serverTime={card.server_time} />
         ) : null}
 
         {card.description ? (

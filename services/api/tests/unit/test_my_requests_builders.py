@@ -20,7 +20,7 @@ def _sql(statement: object) -> str:
 def _page(after: tuple[datetime, uuid_lib.UUID] | None = None, limit: int = 21) -> str:
     return _sql(
         JoinRequestRepository.build_my_requests_page_statement(
-            applicant_id=7, community_slug="tomsk", after=after, limit=limit
+            applicant_id=7, city_slug="tomsk", after=after, limit=limit
         )
     )
 
@@ -48,17 +48,17 @@ def test_page_filters_by_visible_statuses() -> None:
     assert "join_requests.status IN" in sql
 
 
-def test_page_scopes_by_applicant_and_community() -> None:
+def test_page_scopes_by_applicant_and_city() -> None:
     """AC-03, AC-04: срез по заявителю и сообществу — в самом SQL.
 
     Краснеет, если убрать любой из предикатов: чужие заявки попадали бы
     в выдачу (`applicant_id`), а карточки другого сообщества — тоже
-    (`community_slug`, ADR-01).
+    (`city_slug`, ADR-01).
     """
     sql = _page()
 
     assert "join_requests.applicant_id = :applicant_id_1" in sql
-    assert "event_cards.community_slug = :community_slug_1" in sql
+    assert "event_cards.city_slug = :city_slug_1" in sql
 
 
 def test_page_orders_by_submitted_at_and_uuid() -> None:
@@ -106,11 +106,11 @@ def test_count_has_no_cursor_and_same_filters() -> None:
     """
     sql = _sql(
         JoinRequestRepository.build_my_requests_count_statement(
-            applicant_id=7, community_slug="tomsk"
+            applicant_id=7, city_slug="tomsk"
         )
     )
 
     assert "count(join_requests.id)" in sql
     assert "not_selected" not in sql
     assert "join_requests.submitted_at" not in sql
-    assert "event_cards.community_slug = :community_slug_1" in sql
+    assert "event_cards.city_slug = :city_slug_1" in sql

@@ -29,6 +29,9 @@ def _payload(**overrides: object) -> dict[str, object]:
         "place_uuid": PLACE_UUID,
         "starts_at": "2026-11-01T19:00:00+07:00",
         "capacity": 3,
+        # Стори 12.4 (AC-3, FR117/FR118): тип и активность обязательны.
+        "kind": "company",
+        "activity": "boardgames",
     }
     values.update(overrides)
     return values

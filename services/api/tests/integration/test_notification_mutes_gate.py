@@ -69,7 +69,7 @@ _CREATED_PLACES: list[int] = []
 class _RequestSettings:
     """Протокол `JoinRequestSettings` без чтения `.env` (приём 5б.2)."""
 
-    default_community_slug = settings.default_community_slug
+    default_city_slug = settings.default_city_slug
     join_request_active_limit = 2
     s3_signed_url_ttl = 900
 
@@ -77,7 +77,7 @@ class _RequestSettings:
 class _CardJoinSettings:
     """Протокол `CardJoinSettings` без чтения `.env`."""
 
-    default_community_slug = settings.default_community_slug
+    default_city_slug = settings.default_city_slug
 
 
 @pytest.fixture
@@ -169,10 +169,10 @@ async def _new_users(session: AsyncSession, count: int) -> list[User]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_community_slug},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_city_slug},
     )
     place_id = int(row.scalar_one())
     _CREATED_PLACES.append(place_id)
@@ -191,16 +191,17 @@ async def _insert_card(
     starts = now + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at, chat_uuid) "
+            "filled_count, verification_status, published_at, chat_uuid, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, 60, "
-            ":expires, :status, 0, 'approved', :published_at, NULL) RETURNING uuid, id"
+            ":expires, :status, 0, 'approved', :published_at, NULL,"
+            "'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": settings.default_community_slug,
+            "slug": settings.default_city_slug,
             "starts": starts,
             "capacity": capacity,
             "expires": starts - timedelta(hours=1),

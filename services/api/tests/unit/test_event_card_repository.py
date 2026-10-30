@@ -89,16 +89,16 @@ def test_author_lock_uses_for_update_not_card_table() -> None:
     assert "event_cards" not in sql
 
 
-def test_active_count_has_no_community_slice() -> None:
+def test_active_count_has_no_city_slice() -> None:
     """AC-01: лимит — персональный, срез сообщества в подсчёт не входит.
 
-    Краснеет, если добавить `community_slug`: автор, сменивший сообщество,
+    Краснеет, если добавить `city_slug`: автор, сменивший сообщество,
     получил бы новый пустой счётчик и обошёл лимит (перенос места между
     сообществами запрещён, но публикация — нет; R-05 касается `PlaceUpdate`).
     """
     where = str(EventCardRepository.build_active_count_statement(7).whereclause)
 
-    assert "community_slug" not in where
+    assert "city_slug" not in where
     assert "event_cards.author_id" in where
 
 
@@ -116,3 +116,72 @@ def test_publish_cas_is_update_not_select() -> None:
 
     assert sql.startswith("UPDATE event_cards")
     assert "FOR UPDATE" not in sql
+
+
+class _FakeResult:
+    """Минимальный `Result`: репозиторию нужен только `scalar_one()`."""
+
+    def __init__(self, value: int) -> None:
+        self._value = value
+
+    def scalar_one(self) -> int:
+        return self._value
+
+
+class _FakeSession:
+    """Сессия без БД: запоминает statement, возвращает заданное число.
+
+    Проверяется ФАКТ запроса к БД, а не форма вызова: `count_overdue_windows`
+    мог бы вернуть `0` литералом, и интеграционный тест заметил бы это только
+    на живой PostgreSQL (а без `DATABASE_URL` он скипается — урок 11.4).
+    """
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+        self.statements: list[object] = []
+
+    async def execute(self, statement: object) -> _FakeResult:
+        self.statements.append(statement)
+        return _FakeResult(self.value)
+
+
+async def test_count_overdue_windows_executes_query_and_returns_scalar() -> None:
+    """AC-3 стори 11.8: счётчик обязан СПРОСИТЬ БД и вернуть её ответ.
+
+    Краснеет на мутации M-11.8c (`return 0` литералом вместо запроса):
+    в журнале сессии не окажется statement, а вернулось бы 0 вместо
+    подставленного 7. Без этого теста мутация выживала — wiring-тест
+    патчит сам метод и его тело вне зоны видимости.
+    """
+    session = _FakeSession(value=7)
+
+    result = await EventCardRepository(session).count_overdue_windows(now=NOW)  # type: ignore[arg-type]
+
+    assert result == 7
+    assert len(session.statements) == 1
+
+
+async def test_count_overdue_windows_predicate_matches_adr14() -> None:
+    """AC-3: предикат ADR-14 — `status='published'` И `expires_at < now - 5 мин`.
+
+    Краснеет, если потерять запас (`grace_minutes`) или условие статуса:
+    без запаса контроль поднимал бы ложный алерт на каждом прогоне, без
+    статуса — считал бы законно закрытые окна (инцидент на здоровом воркере).
+    """
+    from datetime import timedelta  # noqa: PLC0415 — локальный импорт для ясности теста
+
+    session = _FakeSession(value=0)
+    await EventCardRepository(session).count_overdue_windows(now=NOW)  # type: ignore[arg-type]
+
+    sql = str(session.statements[0])  # type: ignore[attr-defined]
+    # CR 11.8, M-11.8-i: условие статуса обязано быть в WHERE. Без этого
+    # ассерта выпадение фильтра `status='published'` оставляло тест зелёным —
+    # контроль считал бы законно закрытые окна и поднимал ложный алерт.
+    assert "event_cards.status" in sql, f"в запросе нет условия статуса: {sql}"
+
+    params = session.statements[0].compile().params  # type: ignore[attr-defined]
+    bound = [v for v in params.values() if isinstance(v, datetime)]
+    assert bound, f"в запросе нет привязанного времени: {params}"
+    assert NOW - timedelta(minutes=5) in bound, (
+        f"в запросе не запас ADR-14 (NOW - 5 мин): {bound}"
+    )

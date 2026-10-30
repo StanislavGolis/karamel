@@ -34,8 +34,8 @@ STARTS_AT = NOW + timedelta(days=3)
 class _Settings:
     """Минимум настроек — те же поля, что у `CardSettings`."""
 
-    default_community_slug = "tomsk"
-    community_slugs = ("tomsk",)
+    default_city_slug = "tomsk"
+    city_slugs = ("tomsk",)
     card_default_decision_window_minutes = 2880
     card_content_stop_words: tuple[str, ...] = ()
     card_active_limit = 2
@@ -91,7 +91,7 @@ def _card(**overrides: Any) -> EventCard:
     values: dict[str, Any] = {
         "author_id": 7,
         "place_id": 42,
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
         "title": "Настольные игры",
         "category": "cafe",
         "starts_at": STARTS_AT,

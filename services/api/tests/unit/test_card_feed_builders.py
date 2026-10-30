@@ -22,20 +22,20 @@ def _sql(statement: object) -> str:
     return str(statement)
 
 
-def test_feed_statement_filters_by_community_status_and_future() -> None:
+def test_feed_statement_filters_by_city_status_and_future() -> None:
     """AC-01: срез сообщества, набор статусов ленты и `starts_at >= now`.
 
     Краснеет от снятия любого из трёх условий:
-    - без `community_slug` лента показывала бы чужие города;
+    - без `city_slug` лента показывала бы чужие города;
     - без `status IN` в выдачу попали бы `draft`/`cancelled`;
     - без `starts_at >=` — прошедшие встречи.
     """
     statement = EventCardRepository.build_feed_statement(
-        community_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
+        city_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
     )
     sql = _sql(statement)
 
-    assert "event_cards.community_slug = " in sql
+    assert "event_cards.city_slug = " in sql
     assert "event_cards.status IN " in sql
     assert "event_cards.starts_at >= " in sql
     # Значения набора уходят postcompile-параметрами (`.in_()`), поэтому
@@ -58,7 +58,7 @@ def test_feed_statement_orders_by_starts_at_then_uuid() -> None:
     станет неопределённым, и keyset-сравнение начнёт терять строки.
     """
     statement = EventCardRepository.build_feed_statement(
-        community_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
+        city_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
     )
     sql = _sql(statement)
 
@@ -74,7 +74,7 @@ def test_feed_statement_applies_keyset_tuple() -> None:
     """
     after = (_NOW, uuid_lib.UUID("00000000-0000-0000-0000-000000000001"))
     statement = EventCardRepository.build_feed_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         now=_NOW,
         category=None,
         has_seats=False,
@@ -93,7 +93,7 @@ def test_feed_statement_without_cursor_has_no_keyset() -> None:
     начиналась бы не с начала ленты.
     """
     statement = EventCardRepository.build_feed_statement(
-        community_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
+        city_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
     )
 
     assert "(event_cards.starts_at, event_cards.uuid) > " not in _sql(statement)
@@ -106,7 +106,7 @@ def test_feed_statement_has_seats_is_arithmetic() -> None:
     прошла бы фильтр, а карточка `full` с рассинхроном — выпала бы.
     """
     statement = EventCardRepository.build_feed_statement(
-        community_slug="tomsk", now=_NOW, category=None, has_seats=True, after=None, limit=21
+        city_slug="tomsk", now=_NOW, category=None, has_seats=True, after=None, limit=21
     )
     sql = _sql(statement)
 
@@ -120,7 +120,7 @@ def test_feed_statement_without_has_seats_has_no_arithmetic() -> None:
     ленты для всех, а не только для тех, кто включил фильтр.
     """
     statement = EventCardRepository.build_feed_statement(
-        community_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
+        city_slug="tomsk", now=_NOW, category=None, has_seats=False, after=None, limit=21
     )
 
     assert "filled_count < event_cards.capacity" not in _sql(statement)
@@ -129,7 +129,7 @@ def test_feed_statement_without_has_seats_has_no_arithmetic() -> None:
 def test_feed_statement_applies_category() -> None:
     """AC-05: категория — параметр запроса, а не подстановка строки."""
     statement = EventCardRepository.build_feed_statement(
-        community_slug="tomsk",
+        city_slug="tomsk",
         now=_NOW,
         category="cinema",
         has_seats=False,
@@ -152,7 +152,7 @@ def test_feed_count_statement_has_no_cursor_and_has_filters() -> None:
     по разным предикатам.
     """
     statement = EventCardRepository.build_feed_count_statement(
-        community_slug="tomsk", now=_NOW, category="cinema", has_seats=True
+        city_slug="tomsk", now=_NOW, category="cinema", has_seats=True
     )
     sql = _sql(statement)
 
@@ -162,22 +162,22 @@ def test_feed_count_statement_has_no_cursor_and_has_filters() -> None:
     assert "event_cards.category = " in sql
 
 
-def test_visible_statement_filters_by_uuid_and_community_but_not_author() -> None:
+def test_visible_statement_filters_by_uuid_and_city_but_not_author() -> None:
     """AC-02: карточка ищется по `uuid` в срезе сообщества, БЕЗ `author_id`.
 
     Краснеет в двух направлениях:
-    - без `community_slug` участник получал бы карточку чужого города;
+    - без `city_slug` участник получал бы карточку чужого города;
     - с `author_id` карточку не смог бы открыть никто, кроме автора, и лента
       вела бы в `404` на каждую чужую встречу.
     """
     card_uuid = uuid_lib.uuid4()
     statement = EventCardRepository.build_get_visible_statement(
-        card_uuid=card_uuid, community_slug="tomsk"
+        card_uuid=card_uuid, city_slug="tomsk"
     )
     sql = _sql(statement)
 
     assert "event_cards.uuid = " in sql
-    assert "event_cards.community_slug = " in sql
+    assert "event_cards.city_slug = " in sql
     assert "event_cards.author_id = " not in sql
 
 
@@ -229,6 +229,16 @@ def test_card_read_exposes_contract_fields_without_internal_ids() -> None:
         "title",
         "description",
         "category",
+        # Стори 12.4 (AC-7, FR117/FR118): тип и активность видны в ленте
+        # до открытия карточки. Публичные поля контракта, не внутренние адреса.
+        "kind",
+        "activity",
+        # Стори 12.6 (AC-2a, FR119): рамки аудитории видны ДО подачи. Публичные
+        # поля контракта, не внутренние адреса, поэтому здесь, а не в списке
+        # запрещённых ниже.
+        "gender_filter",
+        "age_min",
+        "age_max",
         "starts_at",
         "expires_at",
         # Стори 5б.1 (AC-04, NFR14): серверный якорь отсчёта. Не внутренний
@@ -243,6 +253,12 @@ def test_card_read_exposes_contract_fields_without_internal_ids() -> None:
         # контракта (FR104), а не внутренний адрес — поэтому оно здесь, а не
         # в списке запрещённых ниже.
         "viewer_participates",
+        # Стори 11.5 (AC-2, AC-5, FR82): «моя заявка» и `uuid` для отмены.
+        # Публичные поля: у постороннего `false`/`null`, состав заявившихся
+        # ими не раскрывается (FR81); `uuid` — адрес своего действия, не
+        # чужой строки.
+        "viewer_requested",
+        "viewer_request_uuid",
     }
 
     assert fields == expected

@@ -142,10 +142,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_community_slug},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": settings.default_city_slug},
     )
     place_id = int(row.scalar_one())
     _CREATED_PLACES.append(place_id)
@@ -173,16 +173,17 @@ async def _insert_card(
     expires = now + timedelta(minutes=expires_in_minutes)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, 60, "
-            ":expires, :status, :filled, 'approved', :published_at) RETURNING uuid, id"
+            ":expires, :status, :filled, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid, id"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": settings.default_community_slug,
+            "slug": settings.default_city_slug,
             "starts": starts,
             "capacity": capacity,
             "expires": expires,
@@ -617,7 +618,7 @@ async def test_worker_and_author_select_produce_one_selection(
         await seed.commit()
 
     class _Settings:
-        default_community_slug = settings.default_community_slug
+        default_city_slug = settings.default_city_slug
 
     async def _worker() -> dict[str, int]:
         return await run_decisions(factory, now=moment + timedelta(minutes=1))

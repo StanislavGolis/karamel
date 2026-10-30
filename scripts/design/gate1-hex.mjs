@@ -28,6 +28,12 @@ import { join, relative, resolve } from "node:path";
 
 import { WEB_ROOT, loadTokens } from "./lib/tokens.mjs";
 
+/** Ratchet-список исключений. Замер 2026-10-27: пуст — все 17 legacy-файлов
+ *  содержат 0 литеральных цветов, поэтому исключать нечего. Файл существует,
+ *  чтобы исключение нельзя было добавить молча: тест проверяет, что длина
+ *  `paths` равна задокументированному числу (стори 11.9, AC-6…AC-8). */
+const ALLOWLIST_PATH = join(import.meta.dirname, "legacy-allowlist.json");
+
 const SRC = resolve(WEB_ROOT, "src");
 const COMPONENTS_DIR = join(SRC, "components");
 const MANIFEST_PATH = join(COMPONENTS_DIR, "design-system.manifest.json");
@@ -68,6 +74,23 @@ function walk(dir, skipDir = () => false) {
  * @param {string} content
  * @returns {string[]} — список человекочитаемых описаний
  */
+/**
+ * Читает ratchet-список исключений.
+ *
+ * **Почему отдельный файл, а не статус в манифесте.** Прежняя версия гейта
+ * глушила нарушения по `status === "legacy"`, а статус по умолчанию был
+ * `legacy` — файл без записи в манифесте получал поблажку по факту
+ * отсутствия записи. Замер 2026-10-27 (стори 11.9, З-2): так
+ * `cards/join-request-form.tsx` из стори 11.5 попал в гейт «легаси» сам,
+ * никем не объявленный. Теперь поблажка требует явного пути в списке.
+ *
+ * @returns {Set<string>} — относительные пути от `apps/web/src`
+ */
+export function loadAllowlist() {
+  const raw = JSON.parse(readFileSync(ALLOWLIST_PATH, "utf8"));
+  return new Set(raw.paths ?? []);
+}
+
 export function findColorViolations(content) {
   const violations = [];
 
@@ -167,6 +190,11 @@ function checkManifestCompleteness(byPath) {
 
 function main() {
   const errors = [];
+  // `--strict` (AC-9): исключения не действуют. CI вызывает гейт с флагом —
+  // пока список пуст, режимы эквивалентны, но первое исключение не сможет
+  // проехать в CI молча: строгий прогон его отвергнет.
+  const strict = new Set(process.argv.slice(2)).has("--strict");
+  const allowlist = strict ? new Set() : loadAllowlist();
   const { byPath } = loadManifest();
 
   // --- Н-3: `@theme inline` ломает тёмную тему без ошибки сборки ---
@@ -202,15 +230,15 @@ function main() {
     // миграции, поэтому страницы и layout'ы проверяются наравне с компонентами.
     // Исключение для `legacy`-компонентов сохранено: манифест ещё содержит
     // такие записи, и их владельцы — не волна 5.
-    const entry = byPath.get(resolve(file));
-    const status = entry?.status ?? "legacy";
+    // Стори 11.9: статус в манифесте больше НЕ глушит нарушения. Замер З-3
+    // показал, что 17 legacy-файлов содержат 0 литеральных цветов — ветка
+    // `status === "legacy" → continue` не спасала ни одного файла и была
+    // мёртвой. Осталась только явная поблажка по `legacy-allowlist.json`.
     const isTest = /__tests__|\.test\.tsx?$/.test(file);
-    const isAppFile = rel.split("\\").join("/").startsWith("src/app/");
+    const relFromSrc = rel.split("\\").join("/").replace(/^src\//, "");
+    const allowed = allowlist.has(relFromSrc);
 
-    if (isTest) {
-      continue;
-    }
-    if (status === "legacy" && !isAppFile) {
+    if (isTest || allowed) {
       continue;
     }
 

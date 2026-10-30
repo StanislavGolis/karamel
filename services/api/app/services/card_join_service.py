@@ -80,7 +80,7 @@ class CardJoinSettings(Protocol):
     и не зависит от `.env` (приём `JoinRequestSettings`).
     """
 
-    default_community_slug: str
+    default_city_slug: str
 
 
 class CardLeaveSettings(Protocol):
@@ -90,7 +90,7 @@ class CardLeaveSettings(Protocol):
     и не зависит от `.env` (приём `CardJoinSettings`).
     """
 
-    default_community_slug: str
+    default_city_slug: str
 
 
 def _chat_settings() -> ChatSettings:
@@ -204,7 +204,7 @@ async def join_open_card(
        РАЗНЫМ карточкам встают в очередь по `users`, а не по `event_cards`,
        поэтому дедлок `users ↔ cards` невозможен; обратный порядок
        (`cards → users`) даёт встречную очередь и дедлок;
-    2. карточка по `uuid` + `community_slug` (AC-11): чужое сообщество
+    2. карточка по `uuid` + `city_slug` (AC-11): чужое сообщество
        неотличимо от несуществующей карточки;
     3. `404` — карточки нет (после блокировки, но до проверок прав);
     4. `403 JOIN_REQUEST_OWN_CARD` (AC-10) — своя карточка. Раньше статуса:
@@ -263,7 +263,7 @@ async def join_open_card(
     await users.lock_for_update(actor_id)
 
     # 2. AC-11: чтение со срезом сообщества (чужая == несуществующая).
-    card = await requests.get_card_for_join(card_uuid, settings.default_community_slug)
+    card = await requests.get_card_for_join(card_uuid, settings.default_city_slug)
     # 3. AC-11, ADR-13: `404` с тем же телом, что у несуществующей.
     if card is None:
         raise CardJoinNotFoundError()
@@ -529,7 +529,7 @@ async def leave_open_card(
        join_requests` совпадает с присоединением; обратный порядок двух
        параллельных операций (join A, leave B) дал бы встречную очередь
        и дедлок;
-    2. карточка по `uuid` + `community_slug` (AC-08): чужое сообщество
+    2. карточка по `uuid` + `city_slug` (AC-08): чужое сообщество
        неотличимо от несуществующей карточки;
     3. `404 card_not_found` — карточки нет;
     4. `UPDATE` мест (`release_seat`) ПЕРВЫМ внутри `begin_nested` (AC-02):
@@ -565,7 +565,7 @@ async def leave_open_card(
     await users.lock_for_update(actor_id)
 
     # 2. AC-08: чтение со срезом сообщества (чужая == несуществующая).
-    card = await requests.get_card_for_join(card_uuid, settings.default_community_slug)
+    card = await requests.get_card_for_join(card_uuid, settings.default_city_slug)
     # 3. AC-08, ADR-13: `404` с тем же телом, что у несуществующей.
     if card is None:
         raise CardJoinNotFoundError()

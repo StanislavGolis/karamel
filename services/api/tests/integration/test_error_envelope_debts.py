@@ -180,7 +180,7 @@ async def test_category_branch_only_for_places_path() -> None:
     )
 
 
-async def test_patch_with_community_slug_gets_immutable_code() -> None:
+async def test_patch_with_city_slug_gets_immutable_code() -> None:
     """QD A4 (R-05): попытка переноса между сообществами — доменный код.
 
     §18.1: КРАСНЕЕТ от отката ветки `extra_forbidden` — ответ становится общим
@@ -199,7 +199,7 @@ async def test_patch_with_community_slug_gets_immutable_code() -> None:
         [
             {
                 "type": "extra_forbidden",
-                "loc": ("body", "community_slug"),
+                "loc": ("body", "city_slug"),
                 "msg": "Extra inputs are not permitted",
                 "input": "kemerovo",
             }
@@ -211,7 +211,7 @@ async def test_patch_with_community_slug_gets_immutable_code() -> None:
     )
 
     assert response.status_code == 422
-    assert json.loads(response.body) == {"code": "place_community_immutable"}
+    assert json.loads(response.body) == {"code": "place_city_immutable"}
 
 
 async def test_extra_forbidden_other_field_stays_generic() -> None:
@@ -242,4 +242,100 @@ async def test_extra_forbidden_other_field_stays_generic() -> None:
     )
 
     body = json.loads(response.body)
-    assert body["code"] != "place_community_immutable", f"неверный код: {body}"
+    assert body["code"] != "place_city_immutable", f"неверный код: {body}"
+
+
+# --- Стори 12.3, AC-2/AC-4: код ошибки по дате рождения -----------------------
+
+
+def _validation_exc(field: str, value: object, *, type_: str, msg: str) -> Any:
+    """`RequestValidationError` глазами Pydantic: `loc` включает источник."""
+    from fastapi.exceptions import RequestValidationError
+
+    return RequestValidationError(
+        [{"type": type_, "loc": ("body", field), "msg": msg, "input": value}]
+    )
+
+
+async def test_lat_error_gets_invalid_coordinates() -> None:
+    """AC-2 (Task 3.4, M10): ошибка по `lat` — доменный код координат.
+
+    Краснеет, если заменить `COORDINATE_FIELDS` на `frozenset()`: клиент
+    получил бы `invalid_request` и не смог отличить «сломанную форму» от
+    «геолокация вернула мусор» — а второе лечится повтором определения города.
+    """
+    from app.main import validation_error_handler
+
+    exc = _validation_exc("lat", 91.0, type_="less_than_equal", msg="Input should be <= 90")
+    response = await validation_error_handler(_request("/api/v1/places"), exc)
+
+    assert response.status_code == 422
+    assert json.loads(response.body) == {"code": "invalid_coordinates"}
+
+
+async def test_birth_date_error_gets_invalid_request() -> None:
+    """AC-4 (Task 3.4, M9): ошибка по `birth_date` — НЕЙТРАЛЬНЫЙ код.
+
+    Краснеет, если в `main.py` подставить `SENSITIVE_FIELDS` вместо
+    `COORDINATE_FIELDS`: `birth_date` входит в реестр ПД, и клиент показал бы
+    «повторите определение города» на ошибке в дате рождения.
+    """
+    from app.main import validation_error_handler
+
+    exc = _validation_exc(
+        "birth_date", "not-a-date", type_="date_from_datetime_parsing", msg="Invalid date"
+    )
+    response = await validation_error_handler(_request("/api/v1/profiles"), exc)
+
+    assert response.status_code == 422
+    assert json.loads(response.body) == {"code": "invalid_request"}
+
+
+async def test_birth_date_error_does_not_echo_value() -> None:
+    """AC-4 (Task 3.5, M14): отправленное значение НЕ возвращается клиенту.
+
+    Краснеет, если добавить `details: {'input': value}` в ответ: значение
+    пользователя возвращалось бы в теле ошибки, то есть ПД попадали бы в
+    ответ, который кэшируется браузером и пишется в сетевые логи.
+    """
+    from app.main import validation_error_handler
+
+    secret_value = "1990-13-45"
+    exc = _validation_exc(
+        "birth_date", secret_value, type_="date_from_datetime_parsing", msg="Invalid date"
+    )
+    response = await validation_error_handler(_request("/api/v1/profiles"), exc)
+
+    assert secret_value not in response.body.decode()
+
+
+async def test_birth_date_error_is_not_logged() -> None:
+    """AC-4 (Task 3.6, M15): обработчик не пишет ни значения, ни ключа в лог.
+
+    Краснеет, если добавить `logger.warning('validation_error',
+    errors=exc.errors())`: `exc.errors()` содержит `input` с самим значением,
+    и дата рождения попала бы в журнал — прямое нарушение NFR66.
+
+    **Почему `structlog.testing.capture_logs`, а не `caplog` (находка DS).**
+    Первая версия этого теста брала stdlib `caplog` и ПРОПУСТИЛА мутацию:
+    `structlog` с `make_filtering_bound_logger` пишет через свой рендерер в
+    stdout, а не через `logging`-хендлеры, поэтому `caplog` не видит ни одной
+    записи — тест зеленел при любом логе. Ровно урок 11.10: тест, который не
+    исполняет проверяемый путь, проверяет текст, а не поведение.
+    `capture_logs` подменяет цепочку процессоров structlog и перехватывает
+    вызов независимо от рендерера.
+    """
+    from structlog.testing import capture_logs
+
+    from app.main import validation_error_handler
+
+    secret_value = "1990-13-45"
+    exc = _validation_exc(
+        "birth_date", secret_value, type_="date_from_datetime_parsing", msg="Invalid date"
+    )
+    with capture_logs() as captured:
+        await validation_error_handler(_request("/api/v1/profiles"), exc)
+
+    rendered = repr(captured)
+    assert secret_value not in rendered, "значение даты утекло в лог (NFR66)"
+    assert "birth_date" not in rendered, "ключ birth_date утёк в лог (NFR66)"

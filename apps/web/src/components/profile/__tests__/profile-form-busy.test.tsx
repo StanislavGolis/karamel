@@ -9,7 +9,7 @@
  * Проверяется ПАРА: `aria-busy` появляется, а видимый текст не меняется.
  */
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -49,7 +49,10 @@ describe("ProfileForm: §8.3 «формы»", () => {
     // и состояние отправки не наступит вовсе.
     await userEvent.type(screen.getByLabelText(/^Имя/), "Анна");
     await userEvent.type(screen.getByLabelText(/^Город/), "Томск");
-    await userEvent.type(screen.getByLabelText(/^Возраст/), "28");
+    // Стори 12.2, AC-2: `type="date"` — ввод через `change`.
+    fireEvent.change(screen.getByLabelText(/^Дата рождения/), {
+      target: { value: "1994-03-14" },
+    });
     await userEvent.type(screen.getByLabelText(/^О себе/), "Люблю кофе");
 
     const button = screen.getByRole("button", { name: "Сохранить анкету" });

@@ -39,25 +39,25 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 class _CardSettings:
     """Минимум настроек сервиса карточек: слаг сообщества без чтения `.env`.
 
-    `community_slugs` обязателен: сервис сверяет с ним слаг (ADR-01) и на
+    `city_slugs` обязателен: сервис сверяет с ним слаг (ADR-01) и на
     отсутствии поля падает `AttributeError` до всякой логики — заглушка
     обязана повторять протокол, а не «то, что показалось нужным».
     """
 
-    default_community_slug = settings.default_community_slug
-    community_slugs = [settings.default_community_slug]
+    default_city_slug = settings.default_city_slug
+    city_slugs = [settings.default_city_slug]
 
 
 class _JoinSettings:
     """Минимум настроек сервиса присоединения: протокол без чтения `.env`."""
 
-    default_community_slug = settings.default_community_slug
+    default_city_slug = settings.default_city_slug
 
 
 class _ReqSettings:
     """Минимум настроек `submit_join_request`: протокол без чтения `.env`."""
 
-    default_community_slug = settings.default_community_slug
+    default_city_slug = settings.default_city_slug
     join_request_active_limit = 2
     s3_signed_url_ttl = 900
 
@@ -68,8 +68,8 @@ pytestmark = [
 ]
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 def _future(**delta: int) -> datetime:
@@ -121,10 +121,10 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, true) RETURNING id"
         ),
-        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _community()},
+        {"name": f"Кафе {uuid_lib.uuid4().hex[:8]}", "slug": _city()},
     )
     return int(row.scalar_one())
 
@@ -144,16 +144,17 @@ async def _insert_card(
     """Карточка в нужном состоянии — сырым SQL, минуя правила сервиса."""
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, "
-            ":window, :expires, :status, :filled, 'approved', :published_at) RETURNING uuid"
+            ":window, :expires, :status, :filled, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": _community(),
+            "slug": _city(),
             "starts": starts_at,
             "capacity": capacity,
             "window": window_minutes,
@@ -182,6 +183,9 @@ async def _create_draft(client: AsyncClient, token: str, place_id: int, **overri
         "title": "Настольные игры",
         "category": "cafe",
         "place_uuid": place_uuid,
+        # Стори 12.4 (AC-3): тип и активность обязательны в `EventCardCreate`.
+        "kind": "company",
+        "activity": "boardgames",
         "starts_at": _future(days=3).isoformat(),
         "capacity": 3,
     }
@@ -586,9 +590,9 @@ async def test_expired_window_guard_keeps_lock_order_and_writes_nothing() -> Non
                 await cleanup.execute(
                     text(
                         "DELETE FROM places WHERE id NOT IN "
-                        "(SELECT place_id FROM event_cards) AND community_slug = :slug"
+                        "(SELECT place_id FROM event_cards) AND city_slug = :slug"
                     ),
-                    {"slug": settings.default_community_slug},
+                    {"slug": settings.default_city_slug},
                 )
                 await cleanup.execute(
                     text("DELETE FROM users WHERE id = ANY(:users)"), {"users": created_user_ids}
@@ -628,7 +632,7 @@ async def test_server_time_comes_from_injected_moment(session: AsyncSession) -> 
         session,
         card_uuid=uuid_lib.UUID(card_uuid),
         viewer_id=author.id,
-            viewer_community_slug="tomsk",
+            viewer_city_slug="tomsk",
         settings=_CardSettings(),
         now=moment,
     )

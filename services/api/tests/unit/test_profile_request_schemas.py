@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 from pydantic import ValidationError
 
@@ -20,7 +22,9 @@ from app.schemas.profile import (
     ProfileUpdate,
 )
 
-VALID = {"name": "Аня", "city": "Томск", "age": 32, "bio": "люблю горы"}
+# Стори 12.2, AC-2: в запросе дата рождения, а не число лет.
+# 1994-03-14 — 32 полных года на 2026-10-29.
+VALID = {"name": "Аня", "city": "Томск", "birth_date": date(1994, 3, 14), "bio": "люблю горы"}
 
 
 # --- ProfileCreate ---------------------------------------------------------------
@@ -35,10 +39,10 @@ def test_create_accepts_valid_payload() -> None:
     payload = ProfileCreate(**VALID)
 
     assert payload.city == "Томск"
-    assert payload.age == 32
+    assert payload.birth_date == date(1994, 3, 14)
 
 
-@pytest.mark.parametrize("field", ["name", "city", "age", "bio"])
+@pytest.mark.parametrize("field", ["name", "city", "birth_date", "bio"])
 def test_create_requires_all_four_fields(field: str) -> None:
     """AC-02, D-2: `POST` создаёт полную анкету — все четыре поля обязательны.
 
@@ -57,8 +61,9 @@ def test_create_requires_all_four_fields(field: str) -> None:
         ("name", "я" * 51),  # AC-05: предел varchar(50)
         ("city", "я" * 101),  # AC-04: предел varchar(100)
         ("bio", "я" * 501),  # AC-05: доменный предел 500
-        ("age", 17),  # AC-05: нижняя граница
-        ("age", 100),  # AC-05: верхняя граница
+        # Стори 12.2: границы возраста проверяет сервис по `birth_date`
+        # (`underage` / `invalid_birth_date`), а не схема — значений,
+        # которые схема обязана пропустить, у даты нет.
     ],
 )
 def test_create_passes_out_of_range_values_to_service(field: str, value: object) -> None:
@@ -118,7 +123,7 @@ def test_update_keeps_explicit_null_in_fields_set() -> None:
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("name", "я" * 51), ("city", "я" * 101), ("bio", "я" * 501), ("age", 17)],
+    [("name", "я" * 51), ("city", "я" * 101), ("bio", "я" * 501)],
 )
 def test_update_passes_out_of_range_values_to_service(field: str, value: object) -> None:
     """CR 2.3, Решение 1: `PATCH` тоже доходит до сервиса, а не отбивается схемой.

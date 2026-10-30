@@ -35,7 +35,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import EventCardStatus
-from app.models.event_card import CARD_REQUEST_MODE_CAPACITY
+from app.models.event_card import CARD_REQUEST_MODE_CAPACITY, has_audience_bounds_values
 from app.repositories.chats import ChatRepository
 from app.repositories.event_cards import EventCardRepository
 from app.repositories.join_requests import JoinRequestRepository
@@ -149,7 +149,7 @@ async def close_due_card(
         # честный `SKIPPED` лучше `AttributeError` на `None`.
         return DecisionResult(card_uuid=uuid_lib.UUID(int=0), outcome=DecisionOutcome.SKIPPED)
 
-    card_uuid, status, expires_at, capacity = card_row
+    card_uuid, status, expires_at, capacity, gender_filter, age_min, age_max = card_row
 
     if status != EventCardStatus.PUBLISHED or expires_at > now:
         # AC-03: идемпотентность. `full`/`closed`/`finished`/`cancelled`/
@@ -168,12 +168,76 @@ async def close_due_card(
     # смотрит на `filled_count=0`, а не на заявки).
     # Открытый набор окно всё равно закрывает — но БЕЗ выбора (AC-02).
     first = (
-        await requests.first_pending(card_id=card_id)
+        await requests.first_pending(
+            card_id=card_id,
+            # AC-5 стори 12.6 (FR119, ADR-19): автовыбор видит только
+            # прошедших рамки. Предикат — ТОТ ЖЕ объект-выражение, что
+            # считает `within_bounds` в списке автора (AC-5a): вторая
+            # реализация разошлась бы молча.
+            #
+            # `None`, когда рамок нет: подзапрос возраста не нужен вовсе, и
+            # поведение 5б.3 не меняется ни на строку.
+            within_bounds=(
+                JoinRequestRepository.build_within_bounds_predicate(
+                    gender_filter=gender_filter,
+                    age_min=age_min,
+                    age_max=age_max,
+                )
+                if gender_filter is not None or age_min is not None or age_max is not None
+                else None
+            ),
+        )
         if capacity == CARD_REQUEST_MODE_CAPACITY
         else None
     )
 
     if first is None:
+        # AC-5 стори 12.6 (FR119, ADR-19): «рамки отсекли всех» ≠ «никто не
+        # пришёл». В первом случае решение ещё может состояться (автор снимет
+        # рамку — заявка жива), и карточка обязана остаться `published`;
+        # во втором решать нечего, и она закрывается (`CLOSED_NO_CHOICE`), как
+        # до 12.6.
+        #
+        # **Отклонение от Task 5.2 стори** (зафиксировано в DAR): задача
+        # утверждала «прошедших нет → ветка шага 4, нового кода нет». Замер
+        # гард-теста 14 показал обратное: без этой ветки карточка с рамками
+        # уходила в `closed` — то есть AC-5 («status остаётся published»)
+        # нарушался, а человек, подавший заявку, терял её без решения автора.
+        # AC владельца важнее описания задачи (P-31: доказательство — ниже).
+        # CR 12.6 H-6: правило «рамки заданы» берётся из модели
+        # (`has_audience_bounds_values`), а не копируется третьим `is not None`.
+        #
+        # CR 12.6 H-2: ветка действует ТОЛЬКО в режиме заявок (`capacity=1`).
+        # Замер CR: карточка открытого набора (`capacity=3`) с рамками и живой
+        # `pending` больше не закрывалась НИКОГДА — до 12.6 её закрывал
+        # `CLOSED_NO_CHOICE` (AC-02 5б.3, `test_auto_selection_does_not_touch_
+        # open_set_card`). Смысл AC-5 — «человек не теряет заявку без решения
+        # автора», а в открытом наборе заявок нет вовсе (`join_request_service
+        # :submit` отбивает `CAPACITY_ONE_USES_REQUESTS`): там `pending` — это
+        # легаси-строка, и ждать решения по ней нечего. Открытый набор
+        # закрывается окном, как раньше.
+        bounds_set = has_audience_bounds_values(
+            gender_filter=gender_filter, age_min=age_min, age_max=age_max
+        )
+        if (
+            capacity == CARD_REQUEST_MODE_CAPACITY
+            and bounds_set
+            and await requests.has_pending_for_card(card_id=card_id)
+        ):
+            # Заявки есть, но ни одна не проходит рамки: выбора НЕ делаем.
+            # `pending` НЕ переводится в `not_selected`: отказа не было, и
+            # человек вправе дождаться решения (AC-6: причины не сообщаем).
+            #
+            # CR 12.6 H-1: статус остаётся `published` (AC-5), поэтому одного
+            # `SKIPPED` мало — предикат воркера совпал бы с карточкой ВЕЧНО
+            # (замер: `skipped: 1` на каждом прогоне, `count_overdue_windows`
+            # = 1 → ложный алерт «воркер лежит» каждый час) и, имея самый
+            # старый `expires_at`, карточка занимала голову очереди (H-3).
+            # Маркер `audience_skipped_at` — дедупликация без смены статуса;
+            # снимается правкой рамок или новой заявкой.
+            await cards.mark_audience_skipped(card_id=card_id, now=now)
+            return DecisionResult(card_uuid=card_uuid, outcome=DecisionOutcome.SKIPPED)
+
         # Шаг 4: AC-02 — заявок нет, окно НЕ продлевается (D-5b.3-1).
         closed = await cards.close_if_due(card_id=card_id, now=now)
         if closed == 0:

@@ -31,6 +31,8 @@ from app.models.enums import (
     ACTIVE_STATUSES,
     ARCHIVABLE_STATUSES,
     EDITABLE_STATUSES,
+    Activity,
+    CardKind,
     CardVerificationStatus,
     EventCardStatus,
     PlaceCategory,
@@ -38,12 +40,20 @@ from app.models.enums import (
 from app.models.event_card import CARD_REQUEST_MODE_CAPACITY, EventCard
 from app.repositories.event_cards import EventCardRepository
 from app.repositories.join_requests import JoinRequestRepository
+from app.repositories.profile_photos import ProfilePhotoRepository
+from app.repositories.profiles import ProfileRepository
 from app.repositories.users import UserRepository
-from app.schemas.event_card import EventCardCreate, EventCardUpdate
+from app.schemas.event_card import EventCardAuthorProfile, EventCardCreate, EventCardUpdate
+from app.services.age_service import compute_age, today_or_now
 from app.services.card_content_rules import CardContent, evaluate_card_content
 from app.services.card_decision_service import DecisionOutcome, close_due_card
 from app.services.card_feed_cursor import decode_feed_cursor, encode_feed_cursor
 from app.services.event_card_place import ensure_place_available
+from app.services.media_service import (
+    MediaStorageError,
+    MediaUnavailableError,
+    get_signed_url,
+)
 from app.services.notification_service import (
     notify_company_assembled,
     notify_request_selected,
@@ -55,6 +65,14 @@ from app.services.system_message_service import (
 )
 
 logger = structlog.get_logger(__name__)
+
+# AC-4, D-12.7-2 стори 12.7 (ADR-13): заведомо несуществующий `card_id` для
+# выравнивания стоимости пути «карточки нет» с путём «карточка есть».
+# Приём CR 6.3 F-1 (`chat_participants_service._MISSING_CARD_ID`), повторён
+# локально, а не импортирован: сервис карточки не должен зависеть от сервиса
+# состава — это связало бы два домена ради одной константы-нуля.
+# `0` не может быть `id` настоящей карточки (`BIGSERIAL` начинается с 1).
+_MISSING_CARD_ID = 0
 
 
 def _system_message_settings() -> Any:
@@ -81,6 +99,15 @@ __all__ = ("ACTIVE_STATUSES",)
 CARD_NOT_FOUND_CODE = "card_not_found"
 # AC-03 (FR69): прошедшее время — семантика домена, `422`.
 CARD_STARTS_AT_IN_PAST_CODE = "STARTS_AT_IN_PAST"
+# Стори 12.5, AC-01 (FR116, ADR-21): горизонт автора — не дальше 72 часов.
+# Горизонт — валидация на ВХОДЕ, не TTL: поля `published_until` нет, воркера,
+# снимающего карточки по времени публикации, тоже нет.
+# Верхний регистр — §4 `project-context`; эпик писал нижним (`starts_at_too_far`),
+# расхождение — долг `W-12.5-b` (эпик привести к проекту, не наоборот).
+CARD_STARTS_AT_TOO_FAR_CODE = "STARTS_AT_TOO_FAR"
+# Стори 12.5, AC-01: предел горизонта в часах — ОДНО место на сервере.
+# Литерал `72` в других файлах запрещён: число разъедется молча (урок `W-11.7-c`).
+CARD_MAX_HORIZON_HOURS = 72
 # AC-05 (D-4.2-2): править можно только черновик.
 CARD_NOT_DRAFT_CODE = "CARD_NOT_DRAFT"
 # AC-06 (FR113): отклонённая карточка — причина обязательна в `details`.
@@ -90,6 +117,12 @@ CARD_VERIFICATION_PENDING_CODE = "VERIFICATION_PENDING"
 # AC-05: окно решения обязательно в режиме заявок (FR70/FR79). Схема 4.1
 # отбивает это на создании, но `PATCH` может сменить вместимость 2–6 → 1.
 CARD_DECISION_WINDOW_REQUIRED_CODE = "decision_window_required"
+# Стори 12.6, AC-6.4 (FR119, ADR-19): перевёрнутая пара границ возраста.
+# Нижний регистр — как у соседнего `decision_window_required` (код правила
+# формы, а не доменного состояния). Без этого кода и ветки в `_domain_error`
+# `IntegrityError` от CHECK `ck_event_cards_age_range` стал бы `500` —
+# ровно тот дефект, что был найден в 12.5 (`STARTS_AT_TOO_FAR` → `raise error`).
+CARD_AGE_RANGE_INVALID_CODE = "age_range_invalid"
 # Стори 4.4, Task 7 (AC-07, FR71): отказ по лимиту активных карточек.
 # §7.2 закрепляет `429` за лимитами, `409` — за конфликтом состояния.
 CARD_LIMIT_REACHED_CODE = "CARD_LIMIT_REACHED"
@@ -123,8 +156,8 @@ class CardSettings(Protocol):
     чтения `.env` (тот же приём, что в `PlaceService` после 3.1).
     """
 
-    default_community_slug: str
-    community_slugs: tuple[str, ...]
+    default_city_slug: str
+    city_slugs: tuple[str, ...]
     card_default_decision_window_minutes: int
     # Стори 4.3 (AC-02, FR91): стоп-слова автопроверки. В протоколе, а не
     # в `Settings` напрямую: unit-тест подставляет кортеж без чтения `.env`.
@@ -145,6 +178,17 @@ class CardStartsAtInPastError(Exception):
     """AC-03 (FR69): время начала уже прошло."""
 
     code = CARD_STARTS_AT_IN_PAST_CODE
+
+
+class CardStartsAtTooFarError(Exception):
+    """AC-01 (FR116, ADR-21): время начала дальше горизонта автора (72 ч).
+
+    Отдельный класс от `CardStartsAtInPastError`: причины разные, и текст для
+    человека разный («в прошлом» vs «слишком далеко»). Проверки стоят парой,
+    порядок — прошлое ПЕРВЫМ (прошедшая дата информативнее «слишком далеко»).
+    """
+
+    code = CARD_STARTS_AT_TOO_FAR_CODE
 
 
 class CardNotDraftError(Exception):
@@ -173,6 +217,18 @@ class CardDecisionWindowRequiredError(Exception):
     """AC-05 (FR70/FR79): режим заявок требует явного окна решения."""
 
     code = CARD_DECISION_WINDOW_REQUIRED_CODE
+
+
+class CardAgeRangeInvalidError(Exception):
+    """AC-6.4 стори 12.6 (FR119): нижняя граница возраста больше верхней.
+
+    Отдельный класс, а не `ValueError` из CHECK: `422` с машинным кодом
+    `age_range_invalid` позволяет клиенту показать текст у поля возраста.
+    Проверка стоит и в схеме (когда обе границы в одном запросе), и здесь
+    (когда `PATCH` даёт перевёрнутую пару относительно текущего значения).
+    """
+
+    code = CARD_AGE_RANGE_INVALID_CODE
 
 
 class CardLimitReachedError(Exception):
@@ -266,24 +322,24 @@ def _compute_expires_at(*, starts_at: datetime, window_minutes: int, now: dateti
     return min(starts_at, now + timedelta(minutes=window_minutes))
 
 
-def _resolve_community_slug(settings: CardSettings) -> str:
-    """AC-01, ADR-01: слаг из конфига для ЗАПИСИ. Чтение — `user.community_slug`.
+def _resolve_city_slug(settings: CardSettings) -> str:
+    """AC-01, ADR-01: слаг из конфига для ЗАПИСИ. Чтение — `user.city_slug`.
 
     Стори 10.1, AC-05, задача 4.4: функция вызывается ТОЛЬКО из `create_card`.
     Чтение карточки (`list_cards`, `get_card`) берёт слаг из
-    `viewer_community_slug` — то есть из `users.community_slug` зрителя.
+    `viewer_city_slug` — то есть из `users.city_slug` зрителя.
     Второй источник на чтении вернул бы «невидимое сообщество»: карточка
     создана в конфиге, а ищется по колонке пользователя (CR 10.1, DN-1).
 
-    Сверка с `community_slugs` обязательна: опечатка в `.env` создала бы
+    Сверка с `city_slugs` обязательна: опечатка в `.env` создала бы
     карточку в «невидимом сообществе», которой нет ни в одной ленте
-    (`WHERE community_slug = ...` не совпадёт) — тот же дефект, что закрыт
+    (`WHERE city_slug = ...` не совпадёт) — тот же дефект, что закрыт
     в 3.1 AC-03 для мест.
     """
-    slug = settings.default_community_slug
-    if slug not in settings.community_slugs:
+    slug = settings.default_city_slug
+    if slug not in settings.city_slugs:
         raise ValueError(
-            f"default_community_slug {slug!r} отсутствует в community_slugs: "
+            f"default_city_slug {slug!r} отсутствует в city_slugs: "
             "карточка попала бы в невидимое сообщество"
         )
     return slug
@@ -368,7 +424,7 @@ async def create_card(
     `repository` — только для тестов (подмена без БД), как в `event_card_place`.
     """
     moment = now if now is not None else datetime.now(UTC)
-    community_slug = _resolve_community_slug(settings)
+    city_slug = _resolve_city_slug(settings)
 
     # AC-02: место проверяется первым — до вставки и до проверки времени.
     #
@@ -384,13 +440,20 @@ async def create_card(
     # Единственное обращение к `places`: даёт `place_id` для FK и бросает
     # `PlaceNotAvailableError` тем же билдером предиката, что гард 4.1.
     place_id = await _resolve_place_id(
-        session, place_uuid=payload.place_uuid, community_slug=community_slug
+        session, place_uuid=payload.place_uuid, city_slug=city_slug
     )
 
     # AC-03: сравнение строго с серверным моментом; `<=` тоже отказ —
     # «сейчас» уже не «будущее».
     if payload.starts_at <= moment:
         raise CardStartsAtInPastError()
+
+    # AC-01 стори 12.5 (FR116, ADR-21): горизонт автора — не дальше 72 часов.
+    # Порядок «прошлое → далеко» обязателен: прошедшая дата информативнее
+    # «слишком далеко» (U-5). Граница ВКЛЮЧИТЕЛЬНАЯ (`<=`): ровно 72 часа —
+    # ещё допустимо, иначе тесты с `days=3` покраснели бы не по делу.
+    if payload.starts_at > moment + timedelta(hours=CARD_MAX_HORIZON_HOURS):
+        raise CardStartsAtTooFarError()
 
     window = _resolve_decision_window(
         capacity=payload.capacity, requested=payload.decision_window_minutes, settings=settings
@@ -399,10 +462,22 @@ async def create_card(
 
     card = EventCard(
         author_id=author_id,
-        community_slug=community_slug,
+        city_slug=city_slug,
         title=payload.title,
         description=payload.description,
         category=str(payload.category),
+        # AC-3 стори 12.4 (FR117, FR118): тип и активность приходят от автора
+        # явно и сохраняются как есть. Вывода из `capacity` нет намеренно —
+        # это была бы вторая правда о смысле встречи (ADR-20, AC-4).
+        kind=str(payload.kind),
+        activity=str(payload.activity),
+        # AC-2 стори 12.6 (FR119, ADR-19): рамки аудитории сохраняются как
+        # есть. `None` — рамка не задана (мягкий фильтр: карточка видна всем).
+        # Приведение enum→str то же, что у `kind`/`activity`: в БД строка,
+        # CHECK держит белый список.
+        gender_filter=str(payload.gender_filter) if payload.gender_filter is not None else None,
+        age_min=payload.age_min,
+        age_max=payload.age_max,
         starts_at=payload.starts_at,
         capacity=payload.capacity,
         decision_window_minutes=window,
@@ -427,7 +502,7 @@ async def create_card(
 
 
 async def _resolve_place_id(
-    session: AsyncSession, *, place_uuid: uuid_lib.UUID, community_slug: str
+    session: AsyncSession, *, place_uuid: uuid_lib.UUID, city_slug: str
 ) -> int:
     """AC-02: внутренний `place_id` для FK — из ТОЙ ЖЕ проверки доступности.
 
@@ -444,7 +519,7 @@ async def _resolve_place_id(
     from app.services.event_card_place import PlaceNotAvailableError
 
     place = await PlaceRepository(session).find_available_for_card(
-        place_uuid=place_uuid, community_slug=community_slug
+        place_uuid=place_uuid, city_slug=city_slug
     )
     if place is None:
         raise PlaceNotAvailableError(place_uuid)
@@ -530,16 +605,21 @@ async def update_card(
     if payload.place_uuid is not None:
         # AC-02: место проверяется тем же гардом, что при создании.
         await ensure_place_available(
-            session, place_uuid=payload.place_uuid, community_slug=card.community_slug
+            session, place_uuid=payload.place_uuid, city_slug=card.city_slug
         )
         card.place_id = await _resolve_place_id(
-            session, place_uuid=payload.place_uuid, community_slug=card.community_slug
+            session, place_uuid=payload.place_uuid, city_slug=card.city_slug
         )
 
     if payload.starts_at is not None:
         # AC-03: проверка «не в прошлом» только для нового значения.
         if payload.starts_at <= moment:
             raise CardStartsAtInPastError()
+        # AC-01 стори 12.5: тот же горизонт, что и на создании, — иначе
+        # `PATCH` стал бы обходом правила («создать нельзя, сдвинуть можно»).
+        # Внутри `if`: правка заголовка без времени не должна требовать `starts_at`.
+        if payload.starts_at > moment + timedelta(hours=CARD_MAX_HORIZON_HOURS):
+            raise CardStartsAtTooFarError()
         card.starts_at = payload.starts_at
 
     # Task 4.6: итоговая вместимость — новая, если передана, иначе текущая.
@@ -600,6 +680,57 @@ async def update_card(
         card.description = payload.description or None
     if payload.category is not None:
         card.category = str(payload.category)
+    # AC-3 стори 12.4: тип и активность меняются по общему правилу PATCH
+    # («не передан = не трогать», см. докстринг `EventCardUpdate`).
+    # Валидатор `other` уже отработал на схеме — сюда легаси-значение
+    # попасть не может, поэтому повторной проверки нет (один источник).
+    if payload.kind is not None:
+        card.kind = str(payload.kind)
+    if payload.activity is not None:
+        card.activity = str(payload.activity)
+    # AC-2 стори 12.6 (FR119): рамки меняются по общей PATCH-семантике, но
+    # с одним отличием от `kind`/`activity`: «снять рамку» — это ЯВНЫЙ `null`,
+    # а не «не передал». Поэтому различие по `model_fields_set`, а не по
+    # значению: `payload.age_min is None` не отличает «не трогать» от
+    # «стереть». Тот же приём, что у `description` (X-19, стори 4.6).
+    #
+    # Тип `age_min`/`age_max` — `int | None`, поэтому приведение к `str` не
+    # нужно; `gender_filter` — enum, в БД строка (CHECK держит белый список).
+    if "gender_filter" in payload.model_fields_set:
+        card.gender_filter = (
+            str(payload.gender_filter) if payload.gender_filter is not None else None
+        )
+    if "age_min" in payload.model_fields_set:
+        card.age_min = payload.age_min
+    if "age_max" in payload.model_fields_set:
+        card.age_max = payload.age_max
+    # CR 12.6 H-1: правка рамок — «появился шанс на решение».
+    #
+    # Карточка, у которой рамки отсекли всех, помечена `audience_skipped_at`
+    # и выпадает из очереди воркера (иначе повтор каждый прогон + ложный
+    # алерт, замер CR H-1). Снятие/смена рамки делает прежнее решение
+    # недействительным: те же `pending` могут теперь проходить, поэтому
+    # метка снимается — иначе карточка осталась бы вне автовыбора НАВСЕГДА,
+    # и автор, расширивший рамки, не получил бы выбора вовсе.
+    #
+    # Ставится `None` здесь, а не отдельным `UPDATE`: строка карточки уже под
+    # `FOR UPDATE` в этой транзакции (ADR-09), второй запрос был бы лишним.
+    if (
+        "gender_filter" in payload.model_fields_set
+        or "age_min" in payload.model_fields_set
+        or "age_max" in payload.model_fields_set
+    ):
+        card.audience_skipped_at = None
+    # AC-6.4: схема отбила только случай, когда ОБЕ границы пришли одним
+    # запросом. Перевёрнутая пара относительно ТЕКУЩЕГО значения проверяется
+    # здесь, на смеси payload и строки: иначе `CHECK` дал бы `IntegrityError`
+    # → `500` (класс дефекта 12.5). Тот же код ответа, что у схемы.
+    if (
+        card.age_min is not None
+        and card.age_max is not None
+        and card.age_min > card.age_max
+    ):
+        raise CardAgeRangeInvalidError()
 
     # AC-04, D-4.2-3: у ЧЕРНОВИКА `expires_at` пересчитывается всегда — меняется
     # либо `starts_at`, либо окно, либо и то и другое.
@@ -848,6 +979,18 @@ class CardFeedItem:
     # точечно. Поле НЕ участвует в безличности (AC-03): проигравший и
     # наблюдатель оба получают `false`, различие было бы утечкой `not_selected`.
     viewer_participates: bool = False
+    # AC-2, AC-5 стори 11.5 (FR82): «моя заявка» — признак ЗРИТЕЛЯ для карточки
+    # режима заявок. Считается из `join_requests` (`status='pending'`), поэтому
+    # живёт в доменном объекте рядом с `viewer_participates`, а не в схеме:
+    # значение требует запроса. `list_cards` заполняет пакетно, `get_card` —
+    # точечно.
+    #
+    # `False`/`None` — легальные состояния (наблюдатель, автор, `selected`),
+    # а не «неизвестно»: третье значение заставило бы клиент ветвиться.
+    viewer_requested: bool = False
+    # AC-5 (FR82): `uuid` заявки — адрес отмены (`DELETE /requests/{uuid}`).
+    # Пусто, когда заявки нет: «нечего отменять» выражено отсутствием адреса.
+    viewer_request_uuid: uuid_lib.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -890,6 +1033,7 @@ def _feed_item_from_row(row: Any, *, server_time: datetime) -> CardFeedItem:
         author_uuid,
         author_name,
         author_age,
+        author_birth_date,
         place_uuid,
         place_name,
         place_address_text,
@@ -909,7 +1053,9 @@ def _feed_item_from_row(row: Any, *, server_time: datetime) -> CardFeedItem:
         server_time=server_time,
         author_uuid=author_uuid,
         author_name=author_name,
-        author_age=author_age,
+        # Стори 12.2, AC-3: наружу — вычисленный возраст. `birth_date`
+        # приоритетнее legacy-`age`: у новых учёток колонка `age` — `NULL`.
+        author_age=compute_age(author_birth_date, author_age, today_or_now()),
         place=place,
     )
 
@@ -920,9 +1066,11 @@ async def list_cards(
     category: PlaceCategory | None = None,
     has_seats: bool = False,
     cursor: str | None = None,
+    kind: CardKind | None = None,
+    activity: Activity | None = None,
     limit: int = CARDS_PAGE_SIZE,
     settings: CardSettings,
-    viewer_community_slug: str,
+    viewer_city_slug: str,
     viewer_id: int | None = None,
     now: datetime | None = None,
 ) -> CardFeedPage:
@@ -930,7 +1078,7 @@ async def list_cards(
 
     Порядок шагов намеренный (тот же, что в `list_places` 3.3):
 
-    1. Слаг берётся из `viewer_community_slug` — `users.community_slug`
+    1. Слаг берётся из `viewer_city_slug` — `users.city_slug`
        зрителя (AC-05 стори 10.1, ADR-01/ADR-13): параметра в контракте нет,
        и клиент не может запросить чужое сообщество. До 10.1 значение бралось
        из конфига; теперь ось показа — сообщество пользователя;
@@ -944,7 +1092,7 @@ async def list_cards(
     `now` — параметр для тестов: реальное время подставляется один раз, и
     граница `starts_at >= now` не «плывёт» между страницей и `COUNT`.
     """
-    community_slug = viewer_community_slug
+    city_slug = viewer_city_slug
     moment = now if now is not None else datetime.now(UTC)
 
     after: tuple[datetime, uuid_lib.UUID] | None = None
@@ -959,13 +1107,21 @@ async def list_cards(
     # фильтра, а не «все категории одним списком»: пустая выдача и отсутствие
     # фильтра обязаны различаться (AC-09, `EmptyState`).
     category_value: str | None = category if category is not None else None
+    # AC-5 стори 12.4: `StrEnum` — подкласс `str`, поэтому сравнение идёт
+    # со значением колонки напрямую. `None` — «фильтра нет», а не «все
+    # значения списком»: пустая выдача и отсутствие фильтра различаются
+    # (AC-09, `EmptyState`).
+    kind_value: str | None = str(kind) if kind is not None else None
+    activity_value: str | None = str(activity) if activity is not None else None
 
     repo = EventCardRepository(session)
     rows, total = await repo.list_feed_page(
-        community_slug=community_slug,
+        city_slug=city_slug,
         now=moment,
         category=category_value,
         has_seats=has_seats,
+        kind=kind_value,
+        activity=activity_value,
         after=after,
         # AC-08: лишняя строка — признак следующей страницы, а не часть выдачи.
         limit=limit + 1,
@@ -982,10 +1138,27 @@ async def list_cards(
     # ему нужны `card.id` уже отобранных строк — иначе пришлось бы читать
     # карточки дважды.
     if items and viewer_id is not None:
-        participating = await JoinRequestRepository(session).viewer_participation_card_ids(
+        # AC-09 5б.2 + AC-2 11.5: ОБА признака зрителя — ОДНИМ запросом.
+        # Раздельные `SELECT` нарушали контракт анти-оракула
+        # (`test_oracle_exact_query_count`): число SQL на `GET` зафиксировано,
+        # и лишний запрос краснит тест даже при верном JSON.
+        #
+        # N+1 недопустим: 20 карточек дали бы 20 запросов на самый частый GET.
+        # Предикаты разные по смыслу: `selected` — участие (место занято),
+        # `pending` — «моя заявка» (место НЕ занято, до решения автора зритель
+        # наблюдатель). Сливать их в один флаг нельзя.
+        state = await JoinRequestRepository(session).viewer_request_state(
             applicant_id=viewer_id, card_ids=[item.card.id for item in items]
         )
-        items = [replace(item, viewer_participates=item.card.id in participating) for item in items]
+        items = [
+            replace(
+                item,
+                viewer_participates=item.card.id in state.participating,
+                viewer_requested=item.card.id in state.pending,
+                viewer_request_uuid=state.pending.get(item.card.id),
+            )
+            for item in items
+        ]
 
     next_cursor: str | None = None
     if has_next and page_rows:
@@ -1004,7 +1177,7 @@ async def get_card(
     *,
     card_uuid: uuid_lib.UUID,
     viewer_id: int,
-    viewer_community_slug: str,
+    viewer_city_slug: str,
     settings: CardSettings,
     now: datetime | None = None,
 ) -> CardFeedItem:
@@ -1029,11 +1202,11 @@ async def get_card(
     «существует в другом городе» от «нет такой», то есть раскрыл бы
     существование карточки, которую участник не должен видеть.
     """
-    community_slug = viewer_community_slug
+    city_slug = viewer_city_slug
     moment = now if now is not None else datetime.now(UTC)
 
     repo = EventCardRepository(session)
-    row = await repo.get_visible_card(card_uuid=card_uuid, community_slug=community_slug)
+    row = await repo.get_visible_card(card_uuid=card_uuid, city_slug=city_slug)
     if row is None:
         # AC-02: нет карточки ИЛИ она в другом сообществе — ответ один.
         raise CardNotFoundError()
@@ -1074,7 +1247,7 @@ async def get_card(
         """
         nonlocal mutated
         mutated = True
-        fresh_row = await repo.get_visible_card(card_uuid=card_uuid, community_slug=community_slug)
+        fresh_row = await repo.get_visible_card(card_uuid=card_uuid, city_slug=city_slug)
         if fresh_row is None:
             # Карточку удалили между чтением и мутацией — невозможно
             # (физического удаления нет, R-04), но честный `404` лучше
@@ -1183,11 +1356,168 @@ async def get_card(
     # AC-09 стори 5б.2 (D-5b.2-7, FR104): признак участия зрителя — точечный
     # запрос на одну карточку. Пакетный приём нужен ленте (20 карточек); здесь
     # второго `SELECT` на страницу нет, и «оптимизировать» его нечем.
-    participating = await JoinRequestRepository(session).viewer_participation_card_ids(
+    # AC-09 5б.2 + AC-2 11.5: оба признака зрителя — ОДНИМ запросом.
+    # Число SQL на `GET /cards/{uuid}` зафиксировано контрактом анти-оракула
+    # (`test_oracle_exact_query_count`): два раздельных `SELECT` краснили бы
+    # его при верном JSON. Тот же метод, что в ленте, — иначе состояние
+    # карточки в ленте разошлось бы с её же экраном.
+    state = await JoinRequestRepository(session).viewer_request_state(
         applicant_id=viewer_id, card_ids=[item.card.id]
     )
-    item = replace(item, viewer_participates=item.card.id in participating)
+    item = replace(
+        item,
+        viewer_participates=item.card.id in state.participating,
+        viewer_requested=item.card.id in state.pending,
+        viewer_request_uuid=state.pending.get(item.card.id),
+    )
     return item
+
+
+# AC-4, AC-4a, AC-4b стори 12.7 (FR120, П11, ADR-22): статусы, в которых
+# анкета автора ДОСТУПНА через карточку. `closed` входит намеренно (D-12.7-3,
+# FR74): набор закрыт вручную, но встреча состоится, и анкета нужна, чтобы
+# прийти на неё. Без этой половины «всегда 404» прошло бы AC-4 незамеченным
+# (P-21: пара обязательна).
+AUTHOR_PROFILE_VISIBLE_STATUSES: tuple[EventCardStatus, ...] = (
+    EventCardStatus.PUBLISHED,
+    EventCardStatus.FULL,
+    EventCardStatus.CLOSED,
+    # AC-4c, D-12.7-3: черновик. Для постороннего он уже невидим (`get_card`
+    # отдаёт `CardNotFoundError`), а АВТОР обязан видеть свою анкету на своём
+    # черновике — иначе получил бы `404` от собственного профиля, поведение,
+    # которого никто не проектировал.
+    EventCardStatus.DRAFT,
+)
+
+
+def _author_photo_ttl(*, starts_at: datetime, now: datetime, settings: CardSettings) -> int:
+    """AC-5, D-12.7-4: TTL подписи не переживает карточку.
+
+    `max(1, ...)` — не косметика (R3): воркер архивации может отстать, и
+    `starts_at` окажется в прошлом. Отрицательный `ExpiresIn` ушёл бы в
+    `boto3` и дал бы `500` вместо `404`/короткой ссылки. Верхняя граница —
+    общий TTL хранилища: удлинять подпись сверх принятого в продукте
+    (`NFR23`) нельзя, даже если встреча через неделю.
+
+    Значение ОДНО для `ExpiresIn` подписи и для `expires_in` в ответе
+    (D-12.7-4): две формулы разошлись бы при первой правке.
+    """
+    remaining = int((starts_at - now).total_seconds())
+    return max(1, min(settings.s3_signed_url_ttl, remaining))
+
+
+async def get_card_author_profile(
+    session: AsyncSession,
+    *,
+    card_uuid: uuid_lib.UUID,
+    viewer_id: int,
+    viewer_city_slug: str,
+    settings: CardSettings,
+    now: datetime | None = None,
+) -> EventCardAuthorProfile:
+    """AC-4, AC-4a, AC-4b, AC-4c, AC-5, AC-2: анкета автора в контексте карточки.
+
+    ЕДИНСТВЕННАЯ точка чтения чужой анкеты (D-12.7-1, ADR-22): постоянной
+    витрины `/profiles/{uuid}` нет, а `GET /cards/{uuid}` на архиве обязан
+    оставаться `200` (FR73, замок `test_cards_state_api.py:492-512`). Поэтому
+    анкета — под-маршрут карточки, и её видимость равна видимости карточки.
+
+    Порядок шагов — контракт:
+
+    1. `get_card` (4.5): срез сообщества, `draft` чужого автора → `404`,
+       ленивые переходы окна и архива. Второй запрос видимости не заводится;
+    2. **статус ДО анкеты и ДО подписи** (Task 2.3, U15): на архиве не должно
+       быть ни запроса к фото, ни вызова `get_signed_url`. Подпись — внешний
+       эффект, и «сначала подписали, потом отказали» тратило бы ресурс на
+       каждый перебор;
+    3. анкета и главное одобренное фото — по одному запросу;
+    4. сборка: `age` ТОЛЬКО `compute_age` (AC-2, 12.2), `birth_date` наружу
+       не уходит никогда.
+
+    **Три причины — одно тело** (D-12.7-2, ADR-13): нет карточки · чужой
+    город · архив дают `CardNotFoundError` → `404 card_not_found`. Нового
+    знания ответ не даёт: статус архивной карточки участник и так видит в
+    `GET /cards/{uuid}`.
+
+    **Анти-оракул по числу запросов** (D-12.7-2, приём CR 6.3 F-1):
+    `get_card` на несуществующей карточке выходит раньше, чем считает
+    `viewer_request_state`, поэтому путей с разной стоимостью было бы два.
+    Выравнивание — тем же запросом с заведомо несуществующим `card_id`
+    (`_MISSING_CARD_ID`): результат заведомо пуст и не проверяется, задача —
+    не дать времени ответа зависеть от существования карточки.
+    """
+    moment = now if now is not None else datetime.now(UTC)
+
+    try:
+        item = await get_card(
+            session,
+            card_uuid=card_uuid,
+            viewer_id=viewer_id,
+            viewer_city_slug=viewer_city_slug,
+            settings=settings,
+            now=moment,
+        )
+    except CardNotFoundError:
+        # D-12.7-2: «нет карточки», «чужой город» и «чужой черновик» выходят
+        # здесь. Выравнивание до стоимости пути с найденной карточкой:
+        # тот же запрос признаков зрителя, заведомо пустой.
+        await JoinRequestRepository(session).viewer_request_state(
+            applicant_id=viewer_id, card_ids=[_MISSING_CARD_ID]
+        )
+        raise
+
+    # AC-4, AC-4a: архив → 404. `finished`/`cancelled` — терминальные
+    # состояния (FR73): встреча прошла или отменена, анкета больше не нужна.
+    # Проверка ДО чтения анкеты и ДО подписи (Task 2.3, U15).
+    if item.card.status not in AUTHOR_PROFILE_VISIBLE_STATUSES:
+        raise CardNotFoundError()
+
+    profile = await ProfileRepository(session).get_by_user_id(item.card.author_id)
+    storage_keys = await ProfilePhotoRepository(session).list_primary_approved_by_user_ids(
+        [item.card.author_id]
+    )
+
+    # AC-2, 12.3: возраст ТОЛЬКО вычисленный. `birth_date` приоритетнее
+    # legacy-`age`: у новых учёток колонка `age` — `NULL`.
+    age = (
+        None
+        if profile is None
+        else compute_age(profile.birth_date, profile.age, today_or_now())
+    )
+
+    # AC-5: TTL считается ОДИН раз и уходит и в подпись, и в ответ.
+    ttl = _author_photo_ttl(starts_at=item.card.starts_at, now=moment, settings=settings)
+    storage_key = storage_keys.get(item.card.author_id)
+    photo_url: str | None = None
+    if storage_key is not None:
+        try:
+            photo_url = get_signed_url(storage_key, ttl=ttl)
+        except (MediaStorageError, MediaUnavailableError):
+            # Приём `_sign_photos` (5а.4): сбой хранилища не валит экран.
+            # URL не логируется никогда (D-11) — только факт сбоя.
+            logger.warning(
+                "card_author_profile.photo.sign_failed", user_id=item.card.author_id
+            )
+
+    return EventCardAuthorProfile(
+        uuid=item.author_uuid,
+        # Имя: сначала из JOIN'а `get_card` (`author_name`), затем из анкеты.
+        # Оба источника допустимы: `LEFT JOIN profiles` в карточке уже
+        # посчитан, и второй запрос нужен только ради `city`/`bio`.
+        name=(
+            item.author_name
+            if item.author_name is not None
+            else (profile.name if profile is not None else None)
+        ),
+        age=age if age is not None else item.author_age,
+        city=None if profile is None else profile.city,
+        bio=None if profile is None else profile.bio,
+        # AC-5, Task 3.3 (D-5a.4-6): ссылка и срок — вместе или никак.
+        # `expires_in` при `photo_url is None` был бы обещанием ссылки,
+        # которой нет.
+        photo_url=photo_url,
+        photo_expires_in=ttl if photo_url is not None else None,
+    )
 
 
 async def close_card(

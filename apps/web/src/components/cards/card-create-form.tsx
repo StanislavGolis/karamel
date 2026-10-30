@@ -18,8 +18,11 @@
  * где открыта страница (D-10 стори 2.3).
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
+// Стори 12.6 (AC-2, Task 7.2): правило пары границ — из общего модуля,
+// чтобы форма и лента не разошлись (CR 12.6 H-6).
+import { ageRangeFields, withAgeRange } from "@/lib/audience-bounds";
 
 /** Состояния экрана по UX `2а`. `rejected` — 4.3, `limit-reached` — 4.4. */
 type FormState =
@@ -29,7 +32,18 @@ type FormState =
   | { kind: "error"; message: string; field?: FieldName };
 
 /** Поля, к которым привязываются inline-ошибки. */
-type FieldName = "title" | "starts_at" | "place_uuid" | "capacity" | "description";
+type FieldName =
+  | "title"
+  | "starts_at"
+  | "place_uuid"
+  | "capacity"
+  | "description"
+  // Стори 12.4 (AC-3): тип и активность — отдельные обязательные поля.
+  | "kind"
+  | "activity"
+  // Стори 12.6 (AC-2, Task 7.2): пара возрастных рамок проверяется вместе.
+  | "age_min"
+  | "age_max";
 
 /**
  * Место из справочника — то, что отдаёт `GET /api/v1/places` (3.3).
@@ -47,6 +61,33 @@ export type PlaceOption = {
 };
 
 /** Коды API → текст. Клиент ветвится по `code`, а не по тексту ответа (§4). */
+/**
+ * Горизонт встречи на клиенте — 72 часа (стори 12.5, AC-1, FR116).
+ *
+ * **Зеркало серверного `CARD_MAX_HORIZON_HOURS`** (`event_card_service.py:95`).
+ * Одна константа на сторону: литерал `72` в двух местах разъехался бы молча
+ * (прецедент `D-10.4-1`, `W-11.7-c`).
+ *
+ * Это **подсказка браузеру** для `max` у `datetime-local`, а НЕ правило:
+ * правило живёт на сервере (`STARTS_AT_TOO_FAR`), потому что часы клиента врут
+ * и их можно перевести назад. Браузерная подсказка экономит один круг
+ * «отправил → получил 422», но никогда его не заменяет.
+ */
+export const CARD_MAX_HORIZON_HOURS = 72;
+
+/**
+ * `max` для `datetime-local`: `момент + 72 ч` в формате «YYYY-MM-DDTHH:mm».
+ *
+ * Формат именно локальный (без `Z` и без секунд): `datetime-local` не понимает
+ * ISO-8601 с зоной и молча игнорирует такое значение — подсказка исчезла бы,
+ * не сломав ни одного теста. Секунды отброшены: шаг поля — минуты.
+ */
+export function horizonLimitLocal(now: Date): string {
+  const limit = new Date(now.getTime() + CARD_MAX_HORIZON_HOURS * 3_600_000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${limit.getFullYear()}-${pad(limit.getMonth() + 1)}-${pad(limit.getDate())}T${pad(limit.getHours())}:${pad(limit.getMinutes())}`;
+}
+
 const ERRORS: Record<string, { message: string; field?: FieldName }> = {
   PLACE_NOT_AVAILABLE: {
     message: "Это место недоступно. Выберите другое из справочника.",
@@ -56,12 +97,23 @@ const ERRORS: Record<string, { message: string; field?: FieldName }> = {
     message: "Нельзя создать встречу в прошлом.",
     field: "starts_at",
   },
+  // Стори 12.5 (AC-1, FR116): серверный горизонт 72 часа. Код верхним
+  // регистром, как требует §4 `project-context`; эпик писал нижним
+  // (`starts_at_too_far`) — расхождение зафиксировано долгом `W-12.5-b`.
+  STARTS_AT_TOO_FAR: {
+    message: "Встречу можно назначить не дальше трёх суток.",
+    field: "starts_at",
+  },
   decision_window_required: {
     message: "Укажите, за сколько времени вы выберете человека.",
     field: "capacity",
   },
   unauthenticated: { message: "Сессия истекла. Войдите снова." },
   request_too_large: { message: "Слишком длинное описание.", field: "description" },
+  // Стори 12.4: машинные коды сервера для новых полей.
+  kind_invalid: { message: "Выберите тип встречи.", field: "kind" },
+  activity_invalid: { message: "Выберите занятие из списка.", field: "activity" },
+  activity_other_reserved: { message: "Выберите занятие из списка.", field: "activity" },
 };
 
 /**
@@ -70,14 +122,34 @@ const ERRORS: Record<string, { message: string; field?: FieldName }> = {
  * `zod` не проверяет «в прошлом» — это серверное правило (AC-03): часы клиента
  * врут, и решение принимает `now()` сервера.
  */
-const formSchema = z.object({
+const formSchema = withAgeRange(
+  z.object({
   title: z.string().trim().min(1, "Название не может быть пустым").max(100, "Слишком длинное"),
   starts_at: z.string().min(1, "Укажите дату и время"),
   place_uuid: z.string().min(1, "Выберите место из справочника"),
   capacity: z.number().int().min(1).max(6),
+  // Стори 12.4 (AC-3, FR117/FR118): оба поля обязательны и НЕ выводятся из
+  // `capacity`. `other` в списке нет — это легаси-значение БД.
+  kind: z.enum(["date", "company"], { message: "Выберите тип встречи" }),
+  activity: z.enum(
+    ["coffee", "walk", "bar", "cinema", "boardgames", "sport"],
+    { message: "Выберите занятие" },
+  ),
   description: z.string().max(2000, "Слишком длинное описание").optional(),
   decision_window_minutes: z.number().int().min(15).max(10080).optional(),
-});
+  // Стори 12.6 (AC-2, Task 7.1–7.2): рамки аудитории. Мягкий фильтр —
+  // карточка видна всем (FR81), поэтому все три поля необязательны.
+  //
+  // Пустые строки — «не задано»: `z.number()` их отклонил бы, а `undefined`
+  // в `JSON.stringify` просто не попадает в payload, и сервер применит своё
+  // «не задано». Это тот же приём, что у `description`.
+  //
+  // Сами границы берутся из `ageRangeFields`, а проверка пары — из
+  // `withAgeRange`: правило одно на форму и на ленту (CR 12.6 H-6).
+  gender_filter: z.enum(["female", "male"]).optional(),
+  ...ageRangeFields,
+  }),
+);
 
 type FormValues = z.infer<typeof formSchema>;
 
@@ -95,8 +167,39 @@ export function CardCreateForm({ places }: Props) {
     starts_at: "",
     place_uuid: "",
     capacity: 2,
+    // Пустые строки — «не выбрано»: `z.enum` их отклонит, и форма не уйдёт,
+    // пока автор не укажет тип и занятие (AC-3). Не выводим из `capacity`.
+    kind: "" as unknown as "date" | "company",
+    activity: "" as unknown as "coffee",
+    // Стори 12.6 (AC-2): рамки НЕ заданы по умолчанию — «ищу любого».
+    // Дефолт «18–99» в форме дал бы карточку с рамками там, где автор
+    // ничего не выбирал (UX §1048: показывать только заданное).
+    gender_filter: undefined,
+    age_min: undefined,
+    age_max: undefined,
   });
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
+  /**
+   * `max` для `datetime-local` — подсказка браузеру, не правило (AC-1).
+   *
+   * Считается в одноразовом `useEffect`, а не в рендере: `new Date()` на
+   * сервере и в браузере даёт разные строки, и гидрация разошлась бы
+   * предупреждением. Эффект без интервала — это НЕ тикающий счётчик (З-9):
+   * значение ставится один раз и дальше не меняется.
+   */
+  const [maxStartsAt, setMaxStartsAt] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    // Правило `react-hooks/set-state-in-effect` снято осознанно, а не для
+    // зелени: значение ЗАВИСИТ от браузерных часов, и вычисление в рендере
+    // разошлось бы с серверным (гидрация). Эффект здесь — синхронизация с
+    // внешней системой (часы), ровно тот случай, для которого он и нужен;
+    // альтернатива (`useSyncExternalStore` с `getServerSnapshot`) дала бы
+    // тот же setState, только в обёртке. Долг `W-12.6-z-1` — переписать на
+    // `useSyncExternalStore`, если правило понадобится включить обратно.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMaxStartsAt(horizonLimitLocal(new Date()));
+  }, []);
 
   const isRequestMode = values.capacity === 1;
   const busy = state.kind === "submitting";
@@ -219,6 +322,11 @@ export function CardCreateForm({ places }: Props) {
           type="datetime-local"
           value={values.starts_at}
           onChange={(event) => update("starts_at", event.target.value)}
+          // AC-1 стори 12.5: подсказка «не дальше трёх суток». Серверное
+          // правило живёт в `create_card`/`update_card`; браузер лишь
+          // подставляет границу в календарь. Удалить этот атрибут безопасно —
+          // `422 STARTS_AT_TOO_FAR` всё равно придёт.
+          max={maxStartsAt}
           className="w-full rounded-md border border-[color:var(--border-input)] px-3 py-2"
         />
       </Field>
@@ -276,6 +384,110 @@ export function CardCreateForm({ places }: Props) {
         </p>
       )}
 
+      <Field label="Тип встречи" error={errors.kind}>
+        {/* AC-3 стори 12.4 (FR117): выбирается ЯВНО. Связи с `capacity` нет
+            намеренно: карточка на одного с типом «компания» легальна (AC-4). */}
+        <div className="flex gap-2" role="group" aria-label="Тип встречи">
+          {([
+            { value: "date", label: "Свидание" },
+            { value: "company", label: "Компания" },
+          ] as const).map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={values.kind === option.value}
+              onClick={() => update("kind", option.value)}
+              className={`h-11 rounded-md border px-4 ${values.kind === option.value ? "border-[color:var(--accent)] font-semibold" : "border-[color:var(--border-input)]"}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </Field>
+
+      <Field label="Чем займётесь" error={errors.activity}>
+        {/* AC-3 стори 12.4 (FR118): шесть значений белого списка. Легаси
+            `other` в форме нет: сервер ответит `422 activity_other_reserved`. */}
+        <select
+          value={values.activity}
+          onChange={(event) => update("activity", event.target.value as "coffee")}
+          className="w-full rounded-md border border-[color:var(--border-input)] px-3 py-2"
+        >
+          <option value="">Выберите занятие</option>
+          <option value="coffee">Кофе</option>
+          <option value="walk">Прогулка</option>
+          <option value="bar">Бар</option>
+          <option value="cinema">Кино</option>
+          <option value="boardgames">Настольные игры</option>
+          <option value="sport">Спорт</option>
+        </select>
+      </Field>
+
+      {/* Стори 12.6 (AC-2, Task 7.1): рамки аудитории. Мягкий фильтр —
+          карточка видна всем, подать заявку может любой (FR81). Все три
+          поля необязательны, и «не задано» — законный ответ: тогда в ленте
+          рамки не показываются вовсе (UX §1048). */}
+      <fieldset className="flex flex-col gap-3 rounded-md border border-[color:var(--border)] p-4">
+        <legend className="px-1 text-base font-medium">Кого ищете (необязательно)</legend>
+        <p className="text-sm text-[color:var(--ink-secondary)]">
+          Карточку увидят все. Рамки подскажут, кого вы ждёте.
+        </p>
+
+        <Field label="Пол" error={undefined}>
+          <select
+            value={values.gender_filter ?? ""}
+            onChange={(event) =>
+              update(
+                "gender_filter",
+                (event.target.value || undefined) as "female" | "male" | undefined,
+              )
+            }
+            className="w-full rounded-md border border-[color:var(--border-input)] px-3 py-2"
+          >
+            {/* «Любой» — именно отсутствие значения, а не третье значение
+                перечисления: сервер ждёт `female`/`male`/NULL (CHECK `0038`). */}
+            <option value="">Любой</option>
+            <option value="female">Женщины</option>
+            <option value="male">Мужчины</option>
+          </select>
+        </Field>
+
+        <div className="flex gap-3">
+          <Field label="Возраст от" error={errors.age_min}>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={18}
+              max={99}
+              value={values.age_min ?? ""}
+              onChange={(event) =>
+                update(
+                  "age_min",
+                  event.target.value === "" ? undefined : Number(event.target.value),
+                )
+              }
+              className="w-full rounded-md border border-[color:var(--border-input)] px-3 py-2"
+            />
+          </Field>
+          <Field label="до" error={errors.age_max}>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={18}
+              max={99}
+              value={values.age_max ?? ""}
+              onChange={(event) =>
+                update(
+                  "age_max",
+                  event.target.value === "" ? undefined : Number(event.target.value),
+                )
+              }
+              className="w-full rounded-md border border-[color:var(--border-input)] px-3 py-2"
+            />
+          </Field>
+        </div>
+      </fieldset>
+
       <Field label="Описание" error={errors.description}>
         <textarea
           value={values.description ?? ""}
@@ -288,7 +500,9 @@ export function CardCreateForm({ places }: Props) {
       </Field>
 
       {state.kind === "error" ? (
-        <p role="alert" className="text-sm text-[color:var(--danger)]">
+        // AC-4: сообщение пришло из ответа API (или сеть недоступна) —
+        // действие не выполнено, тон `danger`. Не унифицировать с `Field`.
+        <p role="alert" className="text-sm text-danger">
           {state.message}
         </p>
       ) : null}
@@ -320,7 +534,10 @@ function Field({
       <span className="font-medium">{label}</span>
       {children}
       {error ? (
-        <span role="alert" className="text-sm text-[color:var(--danger)]">
+        // AC-3 стори 11.9: `Field` показывает только ошибки zod-схемы —
+        // незавершённый ввод, который человек исправляет сам. Тон `warning`.
+        // Отказы API живут в `state.kind === "error"` ниже и остаются `danger`.
+        <span role="alert" className="text-sm text-warning">
           {error}
         </span>
       ) : null}

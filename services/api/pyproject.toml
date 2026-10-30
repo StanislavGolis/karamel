@@ -67,4 +67,12 @@ markers = [
     "integration: требует реальный PostgreSQL и DATABASE_URL в окружении",
     "multiprocess: поднимает два процесса uvicorn на портах 8101/8102 (Chore P-6, O4)",
     "perf: замеряет тайминги и не блокирует PR (TD 6.5, W18)",
+    # Стори 12.9 (W-11.4-d, AC-4): DDL-тесты исполняют `alembic.command`
+    # на ОБЩЕЙ схеме (`tests/integration/conftest.py`, сессионная
+    # `migrated_database` поднимает схему до `head` ОДИН раз). Под `-n`
+    # воркер, читающий таблицу во время `downgrade`, получит
+    # «relation does not exist». Маркер отделяет их от остальных: CI
+    # гоняет `-m ddl` без `-n`, а хук в conftest пропускает их при
+    # `PYTEST_XDIST_WORKER`.
+    "ddl: меняет схему БД — несовместим с xdist",
 ]

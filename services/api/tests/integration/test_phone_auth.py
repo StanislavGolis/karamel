@@ -384,7 +384,7 @@ async def test_phone_taken_by_oauth_account(
             provider="yandex",
             provider_user_id="ya-1",
             phone=PHONE,
-            community_slug="tomsk",
+            city_slug="tomsk",
         )
     )
     await session.flush()
@@ -418,7 +418,7 @@ async def test_phone_blocked_user(
         provider="phone",
         provider_user_id=PHONE,
         phone=PHONE,
-        community_slug="tomsk",
+        city_slug="tomsk",
         status="banned" if banned else "active",
     )
     if not banned:
@@ -569,7 +569,7 @@ async def test_verify_restores_code_on_phone_taken(
             provider="yandex",
             provider_user_id="ya-1",
             phone=PHONE,
-            community_slug="tomsk",
+            city_slug="tomsk",
         )
     )
     await session.flush()
@@ -690,7 +690,7 @@ async def test_garbage_without_code_does_not_burn_attempts(
 # --- DN-3 (CR 10.1): 422 вместо 500 на невалидном сообществе ------------------
 
 
-async def test_verify_maps_community_slug_error_to_422(
+async def test_verify_maps_city_slug_error_to_422(
     client: AsyncClient, sms: SpySmsProvider, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """DN-3: доменная ошибка слага → `422 {code, message, details}`, не `500`.
@@ -719,7 +719,7 @@ async def test_verify_maps_community_slug_error_to_422(
     assert response.status_code == 422, response.text
     body = response.json()
     assert body["code"] == UNKNOWN_COMMUNITY_CODE
-    assert body["details"] == {"community_slug": "paris"}
+    assert body["details"] == {"city_slug": "paris"}
     assert "message" in body
     # DN-3: код не сгорает — причина не в вводе пользователя.
     assert "set-cookie" not in response.headers

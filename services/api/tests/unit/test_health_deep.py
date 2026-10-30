@@ -48,13 +48,25 @@ async def test_deep_health_ok_when_dependencies_alive(
     async def _ok() -> str:
         return health_module.OK
 
+    async def _backup_ok() -> str:
+        return "ok"
+
     monkeypatch.setattr(health_module, "_check_db", _ok)
     monkeypatch.setattr(health_module, "_check_redis", _ok)
+    monkeypatch.setattr(health_module, "backup_freshness", _backup_ok)
 
     response = await client.get("/health/deep")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "checks": {"db": "ok", "redis": "ok"}}
+    body = response.json()
+    assert body["status"] == "ok"
+    # Стори 11.10 (AC-4, З-11): третий признак. Точное равенство словаря из
+    # стори 10.7 стало ложным осознанно — иначе тест краснел бы «по факту»,
+    # а не по решению. Формулировка ниже проверяет те же два ключа и наличие
+    # третьего, не привязываясь к его значению в dev-окружении теста.
+    assert body["checks"]["db"] == "ok"
+    assert body["checks"]["redis"] == "ok"
+    assert set(body["checks"]) == {"db", "redis", "backup"}
 
 
 async def test_deep_health_reports_redis_failure_without_breaking_db(
@@ -72,6 +84,18 @@ async def test_deep_health_reports_redis_failure_without_breaking_db(
     async def _redis_down() -> str:
         raise RedisError("connection refused")
 
+    async def _ok() -> str:
+        return health_module.OK
+
+    async def _backup_ok() -> str:
+        return "ok"
+
+    # `_check_db` подменяется на `ok` НАМЕРЕННО: тест про ИЗОЛЯЦИЮ Redis, а не
+    # про доступность PostgreSQL. Без подмены он требовал бы живой базы (в
+    # локальном прогоне — `fail:gaierror`), то есть проверял бы стенд, а не
+    # маршрут. Тот же класс, что `W-11.8-a`.
+    monkeypatch.setattr(health_module, "_check_db", _ok)
+    monkeypatch.setattr(health_module, "backup_freshness", _backup_ok)
     monkeypatch.setattr(health_module, "_check_redis", _redis_down)
 
     response = await client.get("/health/deep")
@@ -82,6 +106,8 @@ async def test_deep_health_reports_redis_failure_without_breaking_db(
     assert body["checks"]["redis"] == "fail:RedisError"
     # Изоляция проверок: отказ Redis НЕ делает базу отказом.
     assert body["checks"]["db"] == "ok"
+    # И не делает отказом признак бэкапа: три проверки независимы.
+    assert "backup" in body["checks"]
 
 
 async def test_deep_health_reports_db_failure_without_breaking_redis(
@@ -118,8 +144,12 @@ async def test_deep_health_reports_db_failure_without_breaking_redis(
     async def _ok() -> str:
         return health_module.OK
 
+    async def _backup_ok() -> str:
+        return "ok"
+
     monkeypatch.setattr(health_module, "get_engine", lambda: _BrokenEngine())
     monkeypatch.setattr(health_module, "_check_redis", _ok)
+    monkeypatch.setattr(health_module, "backup_freshness", _backup_ok)
 
     response = await client.get("/health/deep")
 
@@ -129,6 +159,7 @@ async def test_deep_health_reports_db_failure_without_breaking_redis(
     assert body["checks"]["db"] == "fail:OSError"
     # Изоляция в обратную сторону: отказ БД НЕ делает Redis отказом.
     assert body["checks"]["redis"] == "ok"
+    assert "backup" in body["checks"]
 
 
 async def test_deep_health_timeout_becomes_failure_not_500(
@@ -149,7 +180,15 @@ async def test_deep_health_timeout_becomes_failure_not_500(
         await asyncio.sleep(10)
         return health_module.OK
 
+    async def _ok() -> str:
+        return health_module.OK
+
+    async def _backup_ok() -> str:
+        return "ok"
+
     monkeypatch.setattr(health_module, "_check_db", _hanging)
+    monkeypatch.setattr(health_module, "_check_redis", _ok)
+    monkeypatch.setattr(health_module, "backup_freshness", _backup_ok)
     monkeypatch.setattr(health_module, "_CHECK_TIMEOUT_SECONDS", 0.01)
 
     response = await client.get("/health/deep")
@@ -178,3 +217,37 @@ async def test_plain_health_still_does_not_touch_database(
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+async def test_stale_backup_keeps_http_200(
+    client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A-9 (AC-4 стори 11.10): `backup: stale` НЕ меняет HTTP-код и `status`.
+
+    **Почему это отдельный тест, а не следствие предыдущих.** Все прежние
+    тесты держат `backup` в `ok`. Мутация «`stale` → 503» проходила бы их
+    все: код 200 остаётся 200 при `ok`, а при `stale` никто не смотрел.
+
+    **Почему именно 200.** `503` погасил бы `healthcheck` контейнера `api`
+    (compose начнёт перезапускать api при живом сервисе), а `health-probe`
+    послал бы алерт «всё лежит» — то есть устаревший бэкап маскировался бы
+    под отказ продукта. Деградация бэкапа — не отказ сервиса.
+    """
+    from app.api.v1 import health as health_module
+
+    async def _ok() -> str:
+        return health_module.OK
+
+    async def _stale() -> str:
+        return "stale"
+
+    monkeypatch.setattr(health_module, "_check_db", _ok)
+    monkeypatch.setattr(health_module, "_check_redis", _ok)
+    monkeypatch.setattr(health_module, "backup_freshness", _stale)
+
+    response = await client.get("/health/deep")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["checks"]["backup"] == "stale"

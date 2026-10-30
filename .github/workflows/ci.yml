@@ -40,7 +40,10 @@ jobs:
       # `working-directory` job'а — apps/web, скрипты лежат в karamel/scripts:
       # пути считаются от корня репозитория явно, иначе шаг упадёт на «no such file».
       - name: Гейт 1 — hex и произвольные цвета в компонентах
-        run: node ../../scripts/design/gate1-hex.mjs
+        # Стори 11.9 (AC-9): `--strict` — исключения не действуют. Список
+        # `legacy-allowlist.json` пуст, поэтому режимы эквивалентны; флаг стоит,
+        # чтобы первое же исключение не проехало в CI молча.
+        run: node ../../scripts/design/gate1-hex.mjs --strict
       - name: Гейт 2 — контраст светлой темы
         run: node ../../scripts/design/gate2-contrast-light.mjs
       - name: Гейт 3 — каждый токен имеет пару в тёмной теме
@@ -120,6 +123,19 @@ jobs:
             echo "Интеграционные тесты скипнуты — схема не проверена"
             exit 1
           fi
+      # Стори 12.9 (AC-4, W-11.4-d): DDL-тесты отдельным шагом БЕЗ `-n`.
+      #
+      # Почему отдельный шаг. Эти тесты исполняют `alembic.command` на ОБЩЕЙ
+      # схеме (`tests/integration/conftest.py`, сессионная `migrated_database`,
+      # изоляции по схеме нет). Под `-n auto` воркер, читающий таблицу во время
+      # `downgrade`, получает «relation does not exist» — падение не на своём
+      # дефекте. Хук `pytest_collection_modifyitems` в conftest пропускает их
+      # при `PYTEST_XDIST_WORKER`, поэтому при переходе на xdist этот шаг —
+      # единственное место, где DDL реально проверяется. Пока xdist не
+      # установлен (`W-12.9-a`), шаг дублирует часть основного прогона: это
+      # осознанная цена явного гейта (P-32 п.1 — гейт на эффект, не на форму).
+      - name: DDL-тесты (миграции меняют схему — только без xdist)
+        run: python -m pytest -q -m ddl --no-header
 
   migrations:
     name: Migrations — upgrade / downgrade / upgrade

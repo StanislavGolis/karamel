@@ -39,7 +39,7 @@ EXPECTED_COLUMNS: dict[str, tuple[str, str]] = {
     "name": ("character varying", "NO"),
     "category": ("character varying", "NO"),
     "address_text": ("character varying", "NO"),
-    "community_slug": ("character varying", "NO"),
+    "city_slug": ("character varying", "NO"),
     "is_active": ("boolean", "NO"),
     "created_at": ("timestamp with time zone", "NO"),
     "updated_at": ("timestamp with time zone", "NO"),
@@ -50,11 +50,11 @@ FORBIDDEN_COORDINATE_COLUMNS = ("lat", "lng", "latitude", "longitude", "coords",
 EXPECTED_CONSTRAINTS = (
     "pk_places",
     "uq_places_uuid",
-    "uq_places_community_name",
+    "uq_places_city_name",
     "ck_places_category",
     "ck_places_name",
     "ck_places_address_text",
-    "ck_places_community_slug",
+    "ck_places_city_slug",
 )
 
 
@@ -68,7 +68,7 @@ def _place(**overrides: Any) -> dict[str, Any]:
         "name": "Кафе „Прага“",
         "category": "cafe",
         "address_text": "пр. Ленина, 1",
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
     }
     base.update(overrides)
     return base
@@ -79,8 +79,8 @@ async def _insert_place(session: AsyncSession, **overrides: Any) -> None:
     values = _place(**overrides)
     await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug) "
-            "VALUES (:name, :category, :address_text, :community_slug)"
+            "INSERT INTO places (name, category, address_text, city_slug) "
+            "VALUES (:name, :category, :address_text, :city_slug)"
         ),
         values,
     )
@@ -151,7 +151,7 @@ async def test_places_constraint_names_match_model(session: AsyncSession) -> Non
 
     # CR 3.1, патч 12 (AC-03): РАВЕНСТВО, а не подмножество. С `<=` тест был
     # зелёным при появлении лишнего ограничения — например FK
-    # `fk_places_community_slug_communities` на таблицу, которой по ADR-01
+    # `fk_places_city_slug_communities` на таблицу, которой по ADR-01
     # не существует. AC-03 требует «таблица `communities` не создаётся
     # и FK на неё нет», и это должно проверяться, а не подразумеваться.
     assert names == set(EXPECTED_CONSTRAINTS), (
@@ -165,8 +165,8 @@ async def test_no_foreign_keys_on_places(session: AsyncSession) -> None:
 
     Краснеет, если появится FK на `communities`: таблицы сообществ в пилоте
     нет (NFR46), и FK потребовал бы её создать, то есть сменить архитектуру
-    одним «аккуратным» ограничением. Ссылочную целостность `community_slug`
-    держат regex-CHECK и сверка с `Settings.community_slugs`.
+    одним «аккуратным» ограничением. Ссылочную целостность `city_slug`
+    держат regex-CHECK и сверка с `Settings.city_slugs`.
     """
     result = await session.execute(
         text(
@@ -179,22 +179,22 @@ async def test_no_foreign_keys_on_places(session: AsyncSession) -> None:
 
 
 async def test_active_index_is_partial_on_is_active(session: AsyncSession) -> None:
-    """AC-05, FR98: `idx_places_community_active` — частичный по `is_active`.
+    """AC-05, FR98: `idx_places_city_active` — частичный по `is_active`.
 
     Краснеет, если предикат убрать: индекс начнёт индексировать скрытые места,
     и выпадающий список выбора (FR98) потянет их в план запроса. Проверяется
-    и состав колонок: `(community_slug, category)` — порядок под фильтр
+    и состав колонок: `(city_slug, category)` — порядок под фильтр
     «активные места сообщества, категория».
     """
     result = await session.execute(
         text(
             "SELECT indexdef FROM pg_indexes "
-            "WHERE schemaname = 'public' AND indexname = 'idx_places_community_active'"
+            "WHERE schemaname = 'public' AND indexname = 'idx_places_city_active'"
         )
     )
     indexdef = result.scalar_one()
 
-    assert "(community_slug, category)" in indexdef
+    assert "(city_slug, category)" in indexdef
     assert "WHERE is_active" in indexdef
 
 
@@ -240,7 +240,7 @@ async def test_every_enum_category_accepted_by_database(session: AsyncSession) -
         "\t",
         # CR 3.1, патч 8: краевые пробельные и NBSP. До патча CHECK проверял
         # только пустоту (`<> ''`), поэтому `' Прага'` и `'Прага'`
-        # сосуществовали: `uq_places_community_name` сравнивает байты, а сервис
+        # сосуществовали: `uq_places_city_name` сравнивает байты, а сервис
         # ищет дубль по нормализованному значению.
         " Прага",
         "Прага ",
@@ -266,17 +266,17 @@ async def test_blank_text_rejected_by_database(
 
 
 @pytest.mark.parametrize("value", ["Tomsk", "to", "tomsk!", "томск"])
-async def test_bad_community_slug_rejected_by_database(session: AsyncSession, value: str) -> None:
+async def test_bad_city_slug_rejected_by_database(session: AsyncSession, value: str) -> None:
     """AC-03: слаг сообщества подчиняется `^[a-z0-9_-]{3,64}$` в самой БД.
 
-    Краснеет при снятии `ck_places_community_slug`: место легло бы
+    Краснеет при снятии `ck_places_city_slug`: место легло бы
     в сообщество, которого нет в конфиге, и не находилось бы ни одним запросом
     ленты — «невидимое сообщество» без ошибки в логах.
     """
     with pytest.raises(IntegrityError) as excinfo:
-        await _insert_place(session, community_slug=value)
+        await _insert_place(session, city_slug=value)
 
-    assert "ck_places_community_slug" in str(excinfo.value)
+    assert "ck_places_city_slug" in str(excinfo.value)
 
 
 # --- AC-05: активность по умолчанию ---------------------------------------------
@@ -300,8 +300,8 @@ async def test_is_active_defaults_to_true(session: AsyncSession) -> None:
 # --- AC-04: запрет дубля --------------------------------------------------------
 
 
-async def test_duplicate_name_in_same_community_rejected(session: AsyncSession) -> None:
-    """AC-04, D-4: дубль отбивается `uq_places_community_name`.
+async def test_duplicate_name_in_same_city_rejected(session: AsyncSession) -> None:
+    """AC-04, D-4: дубль отбивается `uq_places_city_name`.
 
     Краснеет, если уникальность держится проверкой в сервисе, а ограничения
     нет: две параллельные вставки проходят обе (§18.3), и в выдаче появляются
@@ -312,18 +312,18 @@ async def test_duplicate_name_in_same_community_rejected(session: AsyncSession) 
     with pytest.raises(IntegrityError) as excinfo:
         await _insert_place(session)
 
-    assert "uq_places_community_name" in str(excinfo.value)
+    assert "uq_places_city_name" in str(excinfo.value)
 
 
-async def test_same_name_in_other_community_allowed(session: AsyncSession) -> None:
+async def test_same_name_in_other_city_allowed(session: AsyncSession) -> None:
     """AC-04: одинаковое название в РАЗНЫХ сообществах разрешено.
 
     Краснеет, если уникальность объявить только по `name`: при расширении
     пилота второе сообщество не смогло бы завести «Кафе „Прага“», хотя это
     разные заведения в разных городах.
     """
-    await _insert_place(session, community_slug="tomsk")
-    await _insert_place(session, community_slug="kemerovo")
+    await _insert_place(session, city_slug="tomsk")
+    await _insert_place(session, city_slug="kemerovo")
 
     result = await session.execute(text("SELECT count(*) FROM places"))
 

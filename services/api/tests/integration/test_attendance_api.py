@@ -63,8 +63,8 @@ class _Settings:
     `AttributeError` на живом коде — то есть тест проверял бы заглушку.
     """
 
-    default_community_slug = "tomsk"
-    community_slugs = ("tomsk",)
+    default_city_slug = "tomsk"
+    city_slugs = ("tomsk",)
     card_default_decision_window_minutes = 60
     card_content_stop_words: tuple[str, ...] = ()
     card_active_limit = 5
@@ -128,10 +128,10 @@ async def _company(
 
     place = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:n, 'cafe', 'ул. Мира, 1', :s, true) RETURNING id"
         ),
-        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_community_slug},
+        {"n": f"Кафе {uuid_lib.uuid4().hex[:8]}", "s": settings.default_city_slug},
     )
     place_id = int(place.scalar_one())
 
@@ -145,17 +145,17 @@ async def _company(
     capacity = 2
     card = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at, chat_uuid) "
+            "filled_count, verification_status, published_at, chat_uuid, kind, activity) "
             "VALUES (:a, :p, :s, 'Встреча', NULL, 'cafe', :st, :cap, 60, :e, :status, "
-            ":filled, 'approved', :pub, :chat) "
+            ":filled, 'approved', :pub, :chat, 'company', 'coffee') "
             "RETURNING uuid, id"
         ),
         {
             "a": author.id,
             "p": place_id,
-            "s": settings.default_community_slug,
+            "s": settings.default_city_slug,
             "st": starts_at,
             "cap": capacity,
             "e": expires_at,
@@ -565,9 +565,11 @@ async def test_oracle_exact_query_count(client: AsyncClient, session: AsyncSessi
     #                        приходит `chat_uuid` (D-3), второго запроса нет;
     #   3. `join_requests` — `viewer_participates` (участие зрителя);
     #   4. `attendance`    — собственное состояние (`get_state`), один запрос.
+    #   5. `profiles`      — стори 12.2: гард 18+ читает анкету, чтобы
+    #                       вычислить возраст из `birth_date` (AC-4).
     # Любой лишний `SELECT` (второй запрос видимости, отдельный `chat_uuid`)
     # делает тест красным — это и есть анти-оракул по числу запросов.
-    assert len(statements) == 4, f"точное число SQL изменилось ({len(statements)}): {operators}"
+    assert len(statements) == 5, f"точное число SQL изменилось ({len(statements)}): {operators}"
 
 
 async def test_outsider_indistinguishable_from_missing_card(
@@ -777,7 +779,7 @@ async def test_boundary_starts_at_equals_now_allows(
         card_uuid=uuid_lib.UUID(company["card_uuid"]),
         viewer_id=company["member"].id,
         arrived=True,
-        viewer_community_slug=_Settings.default_community_slug,
+        viewer_city_slug=_Settings.default_city_slug,
         settings=_Settings(),
         now=starts_at,
     )
@@ -802,7 +804,7 @@ async def test_published_past_card_allows_confirmation(
         card_uuid=uuid_lib.UUID(company["card_uuid"]),
         viewer_id=company["member"].id,
         arrived=True,
-        viewer_community_slug=_Settings.default_community_slug,
+        viewer_city_slug=_Settings.default_city_slug,
         settings=_Settings(),
     )
 
@@ -1224,6 +1226,6 @@ async def test_self_confirm_guard_blocks_service_call(
             card_uuid=uuid_lib.UUID(company["card_uuid"]),
             viewer_id=author_id,
             arrived=True,
-            viewer_community_slug=_Settings.default_community_slug,
+            viewer_city_slug=_Settings.default_city_slug,
             settings=cast(Any, _Settings()),
         )

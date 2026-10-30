@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import uuid as uuid_lib
+from datetime import date
 from types import SimpleNamespace
 from typing import Any
 
@@ -22,7 +23,10 @@ from app.schemas.profile import ProfileCreate
 from app.services.profile_service import create_profile
 
 PILOT_CITY = "Томск"
-PAYLOAD = ProfileCreate.model_construct(name="Аня", city="Томск", age=32, bio="люблю горы")
+# Стори 12.2, AC-2: вместо числа лет — дата рождения.
+PAYLOAD = ProfileCreate.model_construct(
+    name="Аня", city="Томск", birth_date=date(1994, 3, 14), bio="люблю горы"
+)
 
 
 class _FakeSession:

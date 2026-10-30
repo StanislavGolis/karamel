@@ -21,7 +21,7 @@ from app.services.place_cursor import InvalidCursorError
 
 
 class _Settings:
-    default_community_slug = "pilot"
+    default_city_slug = "pilot"
     join_request_active_limit = 2
     s3_signed_url_ttl = 900
 

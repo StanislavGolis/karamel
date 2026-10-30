@@ -37,10 +37,19 @@ EXPECTED_COLUMNS: dict[str, tuple[str, str]] = {
     "uuid": ("uuid", "NO"),
     "author_id": ("bigint", "NO"),
     "place_id": ("bigint", "NO"),
-    "community_slug": ("character varying", "NO"),
+    "city_slug": ("character varying", "NO"),
     "title": ("character varying", "NO"),
     "description": ("text", "YES"),
     "category": ("character varying", "NO"),
+    # Стори 12.4 (AC-1, ADR-20): тип встречи и активность. Обе NOT NULL,
+    # потому что AC-2 требует снять дефолт — «магического» значения нет.
+    "kind": ("character varying", "NO"),
+    "activity": ("character varying", "NO"),
+    # Стори 12.6 (AC-1, ADR-19): рамки аудитории. Все три NULL-able: NULL =
+    # «рамка не задана», и карточки, созданные до `0038`, законно их не имеют.
+    "gender_filter": ("character varying", "YES"),
+    "age_min": ("smallint", "YES"),
+    "age_max": ("smallint", "YES"),
     "starts_at": ("timestamp with time zone", "NO"),
     "capacity": ("smallint", "NO"),
     "decision_window_minutes": ("smallint", "NO"),
@@ -58,6 +67,12 @@ EXPECTED_COLUMNS: dict[str, tuple[str, str]] = {
     # Стори 5б.2 (AC-01, D-5b.2-1, миграция `0013`): идентификатор чата
     # компании. `NULL` до выбора автора — компания ещё не собрана.
     "chat_uuid": ("uuid", "YES"),
+    # CR 12.6 H-1/H-3 (миграция `0039`): маркер «рамки отсекли всех».
+    # NULL-able: `NULL` = «рамки никого не отсекали», и карточки, созданные
+    # до `0039`, законно его не имеют. `server_default` нет намеренно —
+    # дефолт означал бы «все старые карточки уже отсеяны», то есть ложь в
+    # поле, влияющем на работу воркера.
+    "audience_skipped_at": ("timestamp with time zone", "YES"),
     "created_at": ("timestamp with time zone", "NO"),
     "updated_at": ("timestamp with time zone", "NO"),
 }
@@ -68,19 +83,25 @@ EXPECTED_CONSTRAINTS = (
     "ck_event_cards_status",
     "ck_event_cards_verification_status",
     "ck_event_cards_category",
+    # Стори 12.4 (AC-1): белые списки типа и активности.
+    "ck_event_cards_kind",
+    "ck_event_cards_activity",
     "ck_event_cards_capacity",
     "ck_event_cards_filled_count",
     "ck_event_cards_decision_window",
     "ck_event_cards_expires_at",
-    "ck_event_cards_community_slug",
+    "ck_event_cards_city_slug",
     "ck_event_cards_published",
     "ck_event_cards_rejection_reason",
     "ck_event_cards_full_capacity",
     "ck_event_cards_request_mode",
+    # Стори 12.6 (AC-1a, AC-1b): порядок границ возраста и белый список пола.
+    "ck_event_cards_age_range",
+    "ck_event_cards_gender_filter",
 )
 
 EXPECTED_INDEXES = (
-    "ix_event_cards_community_starts",
+    "ix_event_cards_city_starts",
     "ix_event_cards_author_active",
     "ix_event_cards_pending_verification",
     "ix_event_cards_due_windows",
@@ -99,7 +120,7 @@ async def _create_user(session: AsyncSession, *, phone: str = "+79009990001") ->
     """
     result = await session.execute(
         text(
-            "INSERT INTO users (provider, phone, community_slug) "
+            "INSERT INTO users (provider, phone, city_slug) "
             "VALUES ('phone', :phone, 'tomsk') RETURNING id"
         ),
         {"phone": phone},
@@ -108,15 +129,15 @@ async def _create_user(session: AsyncSession, *, phone: str = "+79009990001") ->
 
 
 async def _create_place(
-    session: AsyncSession, *, community_slug: str = "tomsk", is_active: bool = True
+    session: AsyncSession, *, city_slug: str = "tomsk", is_active: bool = True
 ) -> int:
     """Создаёт место для FK `place_id` и возвращает его `id`."""
     result = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES ('Кафе „Прага“', 'cafe', 'пр. Ленина, 1', :slug, :active) RETURNING id"
         ),
-        {"slug": community_slug, "active": is_active},
+        {"slug": city_slug, "active": is_active},
     )
     return int(result.scalar_one())
 
@@ -128,9 +149,12 @@ def _card(**overrides: Any) -> dict[str, Any]:
     в БД, а не только в схемах: воркер и админский скрипт пишут сырым SQL.
     """
     base: dict[str, Any] = {
-        "community_slug": "tomsk",
+        "city_slug": "tomsk",
         "title": "Настольные игры",
         "category": "cafe",
+        # Стори 12.4 (AC-1): колонки NOT NULL без дефолта — вставляются явно.
+        "kind": "company",
+        "activity": "boardgames",
         "starts_at": STARTS_AT,
         "capacity": 3,
         "decision_window_minutes": 2880,
@@ -284,6 +308,42 @@ async def test_status_and_verification_defaults(session: AsyncSession) -> None:
     assert row[2] == 0
 
 
+async def test_kind_and_activity_have_no_column_default(session: AsyncSession) -> None:
+    """AC-2 (CR 12.4 H-2): у `kind`/`activity` НЕТ дефолта, но обе `NOT NULL`.
+
+    **Почему отдельный тест.** AC-2 проверяет ЭФФЕКТ, а не форму: важна не
+    строка `alter_column(server_default=None)` в миграции, а отсутствие
+    дефолта в каталоге. До этого теста мутации U-1/U-2 выживали: ни один
+    гард не отличал «дефолт снят» от «дефолт остался». Оставленный дефолт
+    вернул бы «магическое» значение в схему — новая карточка наследовала бы
+    `company`/`other`, и AC-3 (тип выбирает автор) стал бы необязательным.
+
+    **Почему пара с `is_nullable`.** Одного `column_default IS NULL` мало:
+    колонка с дефолтом и колонка, которой нет, дали бы одинаковый результат
+    проверки на `NULL`-дефолт, а «дефолт снят вместе с `NOT NULL`» открыл бы
+    дверь карточкам без смысла. Вторая половина — `is_nullable = 'NO'`.
+    """
+    result = await session.execute(
+        text(
+            "SELECT column_name, column_default, is_nullable "
+            "FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'event_cards' "
+            "AND column_name IN ('kind', 'activity')"
+        )
+    )
+    actual = {row[0]: (row[1], row[2]) for row in result}
+
+    # Обе колонки найдены: иначе тест зеленел бы на отсутствующей колонке.
+    assert set(actual) == {"kind", "activity"}, actual
+    for column in ("kind", "activity"):
+        default, nullable = actual[column]
+        assert default is None, (
+            f"у {column} остался дефолт {default!r}: новая карточка унаследует "
+            "значение, которого автор не выбирал (AC-2)"
+        )
+        assert nullable == "NO", f"{column} стала nullable: карточка без смысла допустима"
+
+
 async def test_uuid_is_generated_by_database(session: AsyncSession) -> None:
     """AC-01, D-2: публичный `uuid` создаётся БД, а не приложением.
 
@@ -318,8 +378,8 @@ async def test_uuid_is_generated_by_database(session: AsyncSession) -> None:
         ({"status": "unknown"}, "ck_event_cards_status"),
         ({"verification_status": "unknown"}, "ck_event_cards_verification_status"),
         ({"category": "bar"}, "ck_event_cards_category"),
-        ({"community_slug": "Tomsk"}, "ck_event_cards_community_slug"),
-        ({"community_slug": "to"}, "ck_event_cards_community_slug"),
+        ({"city_slug": "Tomsk"}, "ck_event_cards_city_slug"),
+        ({"city_slug": "to"}, "ck_event_cards_city_slug"),
         ({"status": "published"}, "ck_event_cards_published"),
         (
             {"verification_status": "rejected"},
@@ -433,7 +493,7 @@ async def test_every_status_is_accepted_by_database(session: AsyncSession) -> No
             session,
             author_id=author_id,
             place_id=place_id,
-            community_slug="tomsk",
+            city_slug="tomsk",
             title=f"Карточка {index}",
             **overrides,
         )
@@ -597,12 +657,12 @@ async def test_all_event_card_indexes_exist(session: AsyncSession) -> None:
     x02 = await session.execute(
         text(
             "SELECT indexdef FROM pg_indexes "
-            "WHERE schemaname = 'public' AND indexname = 'idx_places_community_cursor'"
+            "WHERE schemaname = 'public' AND indexname = 'idx_places_city_cursor'"
         )
     )
     indexdef = x02.scalar_one()
 
-    assert "(community_slug, created_at, uuid)" in indexdef
+    assert "(city_slug, created_at, uuid)" in indexdef
     assert "WHERE is_active" in indexdef
 
 
@@ -634,8 +694,8 @@ async def test_partial_index_predicates_are_exact(session: AsyncSession) -> None
     assert "attendance_prompted_at IS NULL" in defs["ix_event_cards_prompt_due"]
 
 
-async def test_community_starts_index_is_not_partial(session: AsyncSession) -> None:
-    """AC-07: индекс ленты — полный, по `(community_slug, starts_at, status)`.
+async def test_city_starts_index_is_not_partial(session: AsyncSession) -> None:
+    """AC-07: индекс ленты — полный, по `(city_slug, starts_at, status)`.
 
     Краснеет, если его сделать частичным по статусу: лента 4.5 фильтрует
     `status IN ('published','full')`, но архивные карточки нужны участникам
@@ -644,12 +704,12 @@ async def test_community_starts_index_is_not_partial(session: AsyncSession) -> N
     result = await session.execute(
         text(
             "SELECT indexdef FROM pg_indexes "
-            "WHERE schemaname = 'public' AND indexname = 'ix_event_cards_community_starts'"
+            "WHERE schemaname = 'public' AND indexname = 'ix_event_cards_city_starts'"
         )
     )
     indexdef = result.scalar_one()
 
-    assert "(community_slug, starts_at, status)" in indexdef
+    assert "(city_slug, starts_at, status)" in indexdef
     assert "WHERE" not in indexdef
 
 
@@ -657,17 +717,17 @@ async def test_community_starts_index_is_not_partial(session: AsyncSession) -> N
 
 
 async def test_places_cursor_query_uses_cursor_index(session: AsyncSession) -> None:
-    """AC-07 (X-02): выдача мест 3.3 использует `idx_places_community_cursor`.
+    """AC-07 (X-02): выдача мест 3.3 использует `idx_places_city_cursor`.
 
     `enable_seqscan = off` НЕДОСТАТОЧЕН (найдено CR 4.4, X-28): на пустой
     таблице планировщик сравнивает два индекса и выбирает
-    `idx_places_community_active` + `Sort` (cost 8.16) вместо
-    `idx_places_community_cursor` (cost 8.27) — тест падал в 4 прогонах из 5,
+    `idx_places_city_active` + `Sort` (cost 8.16) вместо
+    `idx_places_city_cursor` (cost 8.27) — тест падал в 4 прогонах из 5,
     то есть маскировал бы регресс плана (§18.2/18.3).
 
     `enable_sort = off` закрывает причину, а не симптом: без сортировки
     планировщик обязан искать индекс, отдающий `ORDER BY created_at, uuid`
-    бесплатно. Такой индекс ровно один — `idx_places_community_cursor`.
+    бесплатно. Такой индекс ровно один — `idx_places_city_cursor`.
     Проверено откатом: с `enable_indexscan/enable_indexonlyscan = off`
     (эмуляция отсутствия индекса) тест краснеет.
 
@@ -683,7 +743,7 @@ async def test_places_cursor_query_uses_cursor_index(session: AsyncSession) -> N
             await session.execute(
                 text(
                     "EXPLAIN SELECT uuid FROM places "
-                    "WHERE community_slug = :slug AND is_active "
+                    "WHERE city_slug = :slug AND is_active "
                     "AND (created_at, uuid) > (:ts, :uuid) "
                     "ORDER BY created_at, uuid LIMIT 51"
                 ),
@@ -699,5 +759,5 @@ async def test_places_cursor_query_uses_cursor_index(session: AsyncSession) -> N
     )
     plan = "\n".join(rows)
 
-    assert "idx_places_community_cursor" in plan
+    assert "idx_places_city_cursor" in plan
     assert "Sort" not in plan

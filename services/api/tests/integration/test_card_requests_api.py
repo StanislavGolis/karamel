@@ -100,8 +100,8 @@ async def fake_media(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FakeMedia
     media_service.reset_client()
 
 
-def _community() -> str:
-    return settings.default_community_slug
+def _city() -> str:
+    return settings.default_city_slug
 
 
 async def _new_user(session: AsyncSession) -> tuple[User, str]:
@@ -127,12 +127,12 @@ async def _new_user(session: AsyncSession) -> tuple[User, str]:
 async def _place(session: AsyncSession, *, is_active: bool = True) -> int:
     row = await session.execute(
         text(
-            "INSERT INTO places (name, category, address_text, community_slug, is_active) "
+            "INSERT INTO places (name, category, address_text, city_slug, is_active) "
             "VALUES (:name, 'cafe', 'ул. Мира, 1', :slug, :active) RETURNING id"
         ),
         {
             "name": f"Кафе {uuid_lib.uuid4().hex[:8]}",
-            "slug": _community(),
+            "slug": _city(),
             "active": is_active,
         },
     )
@@ -145,21 +145,22 @@ async def _insert_card(
     author_id: int,
     place_id: int,
     capacity: int = 1,
-    community_slug: str | None = None,
+    city_slug: str | None = None,
 ) -> str:
     starts = datetime.now(UTC) + timedelta(days=3)
     row = await session.execute(
         text(
-            "INSERT INTO event_cards (author_id, place_id, community_slug, title, description, "
+            "INSERT INTO event_cards (author_id, place_id, city_slug, title, description, "
             "category, starts_at, capacity, decision_window_minutes, expires_at, status, "
-            "filled_count, verification_status, published_at) "
+            "filled_count, verification_status, published_at, kind, activity) "
             "VALUES (:author, :place, :slug, 'Встреча', NULL, 'cafe', :starts, :capacity, 60, "
-            ":expires, 'published', 0, 'approved', :published_at) RETURNING uuid"
+            ":expires, 'published', 0, 'approved', :published_at,"
+            "'company', 'coffee') RETURNING uuid"
         ),
         {
             "author": author_id,
             "place": place_id,
-            "slug": community_slug or _community(),
+            "slug": city_slug or _city(),
             "starts": starts,
             "capacity": capacity,
             "expires": starts - timedelta(hours=1),
@@ -316,14 +317,14 @@ async def test_non_author_gets_same_404_as_missing_card(
     assert foreign.json()["code"] == "card_not_found"
 
 
-async def test_other_community_card_is_not_found(
+async def test_other_city_card_is_not_found(
     client: AsyncClient, session: AsyncSession
 ) -> None:
     """AC-02: карточка другого сообщества — `404`, а не пустой список."""
     author, token = await _new_user(session)
     place_id = await _place(session)
     card_uuid = await _insert_card(
-        session, author_id=author.id, place_id=place_id, community_slug="other-city"
+        session, author_id=author.id, place_id=place_id, city_slug="other-city"
     )
     await session.flush()
 

@@ -26,11 +26,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import ConsentUser, CurrentUser
 from app.core.config import settings
 from app.core.db import get_session
-from app.models.enums import CardVerificationStatus, EventCardStatus, PlaceCategory
+from app.models.enums import (
+    Activity,
+    CardKind,
+    CardVerificationStatus,
+    EventCardStatus,
+    Gender,
+    PlaceCategory,
+)
 from app.schemas.attendance import AttendanceAnswer, AttendanceState
 from app.schemas.chat import CardParticipant, CardParticipantsResponse
 from app.schemas.event_card import (
     EventCardAuthor,
+    EventCardAuthorProfile,
     EventCardCreate,
     EventCardFeedResponse,
     EventCardJoinResult,
@@ -63,6 +71,7 @@ from app.services.chat_participants_service import (
 )
 from app.services.event_card_place import PlaceNotAvailableError
 from app.services.event_card_service import (
+    CardAgeRangeInvalidError,
     CardAlreadyJoinedError,
     CardDecisionWindowRequiredError,
     CardEditRequiresReviewError,
@@ -76,11 +85,13 @@ from app.services.event_card_service import (
     CardNotPublishedError,
     CardRejectedError,
     CardStartsAtInPastError,
+    CardStartsAtTooFarError,
     CardVerificationPendingError,
     cancel_card,
     close_card,
     create_card,
     get_card,
+    get_card_author_profile,
     list_cards,
     publish_card,
     update_card,
@@ -148,6 +159,21 @@ def _card_to_read(item: CardFeedItem) -> EventCardRead:
         title=card.title,
         description=card.description,
         category=PlaceCategory(card.category),
+        # AC-7 стори 12.4 (FR117, FR118): тип и активность в ответе.
+        # Приведение тем же способом, что у `category`: рассинхрон CHECK
+        # со `StrEnum` становится видимым `500` на собственном дефекте,
+        # а не молча уходит клиенту строкой.
+        kind=CardKind(card.kind),
+        activity=Activity(card.activity),
+        # AC-2a стори 12.6 (FR119, ADR-19): рамки аудитории видны до подачи.
+        # `gender_filter` приводится к `Gender` тем же способом, что `kind`
+        # и `activity`: рассинхрон CHECK со `StrEnum` станет видимым `500`
+        # на собственном дефекте, а не уйдёт клиенту строкой.
+        gender_filter=(
+            Gender(card.gender_filter) if card.gender_filter is not None else None
+        ),
+        age_min=card.age_min,
+        age_max=card.age_max,
         starts_at=card.starts_at,
         expires_at=card.expires_at,
         # AC-04 стори 5б.1 (NFR14): якорь отсчёта — серверное время, взятое
@@ -177,6 +203,11 @@ def _card_to_read(item: CardFeedItem) -> EventCardRead:
         # получает готовое значение: арифметика «занято vs занял я» на клиенте
         # потребовала бы списка участников, которого в ленте нет.
         viewer_participates=item.viewer_participates,
+        # AC-2, AC-5 стори 11.5 (FR82): «моя заявка» и её `uuid`. Считает
+        # сервис (`list_cards` пакетно, `get_card` точечно) тем же предикатом
+        # `pending`; схема получает готовые значения и не ходит в БД сама.
+        viewer_requested=item.viewer_requested,
+        viewer_request_uuid=item.viewer_request_uuid,
     )
 
 
@@ -264,8 +295,19 @@ def _domain_error(error: Exception) -> JSONResponse:
         error,
         (
             CardStartsAtInPastError,
+            # Стори 12.5 (AC-01, FR116): горизонт 72 ч — `422`, как и «в прошлом»:
+            # значение пришло от клиента и исправимо в форме. Без этой ветки
+            # ошибка уходила в `raise error` ниже и отдавала `500` — доменный
+            # отказ выглядел как поломка сервера (поймано интеграционным тестом
+            # `test_post_beyond_horizon_returns_422`).
+            CardStartsAtTooFarError,
             CardVerificationPendingError,
             CardDecisionWindowRequiredError,
+            # Стори 12.6, AC-6.4 (FR119): перевёрнутая пара границ возраста —
+            # `422`, как и прочие ошибки формы. Ветка обязательна: без неё
+            # ошибка уходила бы в `raise error` ниже и отдавала `500` —
+            # ровно тот дефект, что нашёлся в 12.5 со `STARTS_AT_TOO_FAR`.
+            CardAgeRangeInvalidError,
         ),
     ):
         return _error(error.code, 422)
@@ -328,6 +370,8 @@ async def list_cards_endpoint(
     category: PlaceCategory | None = None,
     has_seats: bool = False,
     cursor: Annotated[str | None, Query()] = None,
+    kind: CardKind | None = None,
+    activity: Activity | None = None,
 ) -> EventCardFeedResponse | JSONResponse:
     """AC-01, AC-04, AC-05, AC-07, AC-08, AC-06: публичная лента сообщества.
 
@@ -346,6 +390,11 @@ async def list_cards_endpoint(
     `cursor` — непрозрачная строка; разбор в сервисе, битое значение даёт
     `422 invalid_cursor`, а не `500` (AC-08).
 
+    `kind` и `activity` — AC-5 стори 12.4 (FR117, FR118). Типизированы
+    `StrEnum`, а не `str`: мусор отбивает Pydantic и `validation_error_handler`
+    отдаёт `422 kind_invalid`/`activity_invalid` — тот же приём, что у
+    `category`. Фильтры независимы: `?kind=date&activity=coffee` — конъюнкция.
+
     `cache-control: no-store` ставит `NoStoreMiddleware` (QD A6): ручная
     установка создала бы второй, независимо поддерживаемый путь заголовка.
 
@@ -357,10 +406,12 @@ async def list_cards_endpoint(
             category=category,
             has_seats=has_seats,
             cursor=cursor,
+            kind=kind,
+            activity=activity,
             settings=settings,
             # AC-05 стори 10.1, ADR-01/ADR-13: срез сообщества — колонка
             # пользователя, не конфиг. Клиент слаг не присылает.
-            viewer_community_slug=reader.community_slug,
+            viewer_city_slug=reader.city_slug,
             # AC-09 стори 5б.2 (D-5b.2-7): зритель нужен для `viewer_participates`
             # — одним пакетным запросом на страницу, не N+1.
             viewer_id=reader.id,
@@ -399,13 +450,55 @@ async def get_card_endpoint(
             viewer_id=user.id,
             # AC-05 стори 10.1, ADR-13: чужое сообщество даёт 404 по колонке
             # пользователя, а не по конфигу.
-            viewer_community_slug=user.community_slug,
+            viewer_city_slug=user.city_slug,
             settings=settings,
         )
     except CardNotFoundError as error:
         return _domain_error(error)
 
     return _card_to_read(item)
+
+
+@router.get("/{card_uuid}/author", response_model=EventCardAuthorProfile)
+async def card_author_profile_endpoint(
+    card_uuid: uuid_lib.UUID,
+    user: ConsentUser,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> EventCardAuthorProfile | JSONResponse:
+    """AC-2, AC-4, AC-4a, AC-4b, AC-5 стори 12.7 (FR120, П11): анкета автора.
+
+    ЕДИНСТВЕННАЯ точка чтения чужой анкеты (D-12.7-1, ADR-22): `GET
+    /profiles/{uuid}` не существует намеренно, а `GET /cards/{uuid}` на
+    архиве обязан оставаться `200` (FR73, замок `test_cards_state_api.py:492-512`).
+
+    `ConsentUser`, а не `CurrentUser`: ответ содержит имя, возраст и фото
+    другого человека — показ ПД без согласия запрещён (FR9), тот же выбор,
+    что у детального экрана и состава компании.
+
+    `card_uuid: UUID` в пути: битый UUID отбивает Pydantic (`422`), а не
+    драйвер (`500`). `/cards/1/author` не резолвится (ADR-13).
+
+    **Архив, чужой город и отсутствие карточки — ОДИН ответ `404
+    card_not_found`** (D-12.7-2, ADR-13, П11): `403` раскрыл бы
+    существование карточки. Ветки `403` здесь нет намеренно, как и в
+    остальных маршрутах карточки.
+
+    Ветка `CardNotFoundError → 404` уже есть в `_domain_error`
+    (`cards.py:230-231`): новый код ошибки не вводится (Task 2.5).
+    """
+    try:
+        profile = await get_card_author_profile(
+            session,
+            card_uuid=card_uuid,
+            viewer_id=user.id,
+            # AC-05 стори 10.1, ADR-13: срез сообщества — колонка зрителя.
+            viewer_city_slug=user.city_slug,
+            settings=settings,
+        )
+    except CardNotFoundError as error:
+        return _domain_error(error)
+
+    return profile
 
 
 @router.post("", status_code=201, response_model=EventCardRef)
@@ -420,7 +513,7 @@ async def create_card_endpoint(
     проверки (NFR51). Полная форма §7.2 (`place`, `author`, `filled_count`,
     `chat_uuid`) — 4.5.
 
-    `community_slug` клиентом не принимается (ADR-01): значение из конфига.
+    `city_slug` клиентом не принимается (ADR-01): значение из конфига.
     Попытка передать — `422` через `extra="forbid"` в `EventCardCreate` (4.1).
 
     `cache-control: no-store` ставит `NoStoreMiddleware`; ручная установка
@@ -431,6 +524,8 @@ async def create_card_endpoint(
     except (
         PlaceNotAvailableError,
         CardStartsAtInPastError,
+        # Стори 12.5, AC-01: горизонт 72 ч — тот же `422`, что и «в прошлом».
+        CardStartsAtTooFarError,
         CardDecisionWindowRequiredError,
     ) as error:
         return _domain_error(error)
@@ -464,6 +559,8 @@ async def update_card_endpoint(
     except (
         PlaceNotAvailableError,
         CardStartsAtInPastError,
+        # Стори 12.5, AC-01: горизонт 72 ч — тот же `422`, что и «в прошлом».
+        CardStartsAtTooFarError,
         CardDecisionWindowRequiredError,
     ) as error:
         return _domain_error(error)
@@ -719,7 +816,7 @@ async def card_participants_endpoint(
             viewer_id=user.id,
             card_uuid=card_uuid,
             # AC-05 стори 10.1: срез сообщества — колонка пользователя.
-            viewer_community_slug=user.community_slug,
+            viewer_city_slug=user.city_slug,
             settings=settings,
         )
     except ParticipantsNotFoundError as error:
@@ -779,7 +876,7 @@ async def get_attendance_endpoint(
             card_uuid=card_uuid,
             viewer_id=user.id,
             # AC-05 стори 10.1: срез сообщества — колонка пользователя.
-            viewer_community_slug=user.community_slug,
+            viewer_city_slug=user.city_slug,
             settings=settings,
         )
     except AttendanceNotFoundError as error:
@@ -819,7 +916,7 @@ async def confirm_attendance_endpoint(
             viewer_id=user.id,
             arrived=payload.arrived,
             # AC-05 стори 10.1: срез сообщества — колонка пользователя.
-            viewer_community_slug=user.community_slug,
+            viewer_city_slug=user.city_slug,
             settings=settings,
         )
     except (
@@ -875,7 +972,7 @@ async def report_no_show_endpoint(
             viewer_id=user.id,
             accused_uuid=payload.accused_uuid,
             # AC-05 стори 10.1: срез сообщества — колонка пользователя.
-            viewer_community_slug=user.community_slug,
+            viewer_city_slug=user.city_slug,
             settings=settings,
         )
     except (

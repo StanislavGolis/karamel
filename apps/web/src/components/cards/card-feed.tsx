@@ -36,6 +36,27 @@ const CATEGORIES: { value: string; label: string }[] = [
   { value: "other", label: "Другое" },
 ];
 
+/**
+ * Стори 12.4 (AC-5, FR117): тип встречи в фильтре ленты.
+ *
+ * Отдельный список от `CATEGORIES`: тип — не категория места (ADR-20),
+ * и смешение дало бы фильтр, которого нет в контракте сервера.
+ */
+const KINDS: { value: string; label: string }[] = [
+  { value: "date", label: "Свидание" },
+  { value: "company", label: "Компания" },
+];
+
+/** Стори 12.4 (AC-5, FR118): занятие — шесть значений белого списка. */
+const ACTIVITIES: { value: string; label: string }[] = [
+  { value: "coffee", label: "Кофе" },
+  { value: "walk", label: "Прогулка" },
+  { value: "bar", label: "Бар" },
+  { value: "cinema", label: "Кино" },
+  { value: "boardgames", label: "Настольные игры" },
+  { value: "sport", label: "Спорт" },
+];
+
 /** Ответ API → форма `EventCard`. Поля совпадают, тип отдельный ради имён. */
 function toFeedCard(card: CardRead): FeedCard {
   return card;
@@ -79,6 +100,10 @@ export function CardFeed() {
   const router = useRouter();
   const [category, setCategory] = useState<string | null>(null);
   const [hasSeats, setHasSeats] = useState(false);
+  // Стори 12.4 (AC-5): независимые фильтры смысла встречи. Хранятся рядом
+  // с `category` и попадают в тот же `fetchCards`.
+  const [kind, setKind] = useState<string | null>(null);
+  const [activity, setActivity] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -95,7 +120,7 @@ export function CardFeed() {
    * эффект.
    */
   const refresh = useCallback(async () => {
-    const result = await fetchCards({ category, hasSeats });
+    const result = await fetchCards({ category, hasSeats, kind, activity });
     if (!result.ok) {
       setState({ kind: "error", code: result.code });
       return;
@@ -106,7 +131,7 @@ export function CardFeed() {
       cursor: result.data.cursor,
       total: result.data.total,
     });
-  }, [category, hasSeats]);
+  }, [category, hasSeats, kind, activity]);
 
   useEffect(() => {
     // Правило `react-hooks/set-state-in-effect` смотрит на ФАКТ вызова функции,
@@ -124,6 +149,18 @@ export function CardFeed() {
     setCategory(value);
   }, []);
 
+  /** Стори 12.4 (AC-5): смена типа встречи. Тот же `loading`, что у категории. */
+  const selectKind = useCallback((value: string | null) => {
+    setState({ kind: "loading" });
+    setKind(value);
+  }, []);
+
+  /** Стори 12.4 (AC-5): смена занятия. */
+  const selectActivity = useCallback((value: string | null) => {
+    setState({ kind: "loading" });
+    setActivity(value);
+  }, []);
+
   /** Переключатель «только со свободными местами». */
   const toggleSeats = useCallback((value: boolean) => {
     setState({ kind: "loading" });
@@ -134,7 +171,13 @@ export function CardFeed() {
   const loadMore = useCallback(async () => {
     if (state.kind !== "loaded" || !state.cursor) return;
     setLoadingMore(true);
-    const result = await fetchCards({ category, hasSeats, cursor: state.cursor });
+    const result = await fetchCards({
+      category,
+      hasSeats,
+      kind,
+      activity,
+      cursor: state.cursor,
+    });
     setLoadingMore(false);
     if (!result.ok) {
       setState({ kind: "error", code: result.code });
@@ -146,9 +189,12 @@ export function CardFeed() {
       cursor: result.data.cursor,
       total: result.data.total,
     });
-  }, [category, hasSeats, state]);
+  }, [category, hasSeats, kind, activity, state]);
 
-  const hasFilter = category !== null || hasSeats;
+  // Стори 12.4: новые фильтры обязаны попасть сюда, иначе при пустой выдаче
+  // экран скажет «карточек нет» вместо «отфильтровано» (UX §775: разные
+  // действия у этих состояний).
+  const hasFilter = category !== null || hasSeats || kind !== null || activity !== null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -173,6 +219,41 @@ export function CardFeed() {
             aria-pressed={category === item.value}
             className={`min-h-11 rounded-full border px-3 text-sm ${
               category === item.value
+                ? "border-accent bg-surface font-medium text-accent"
+                : "border-border text-ink-secondary"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+        <span aria-hidden="true" className="mx-1 h-6 w-px bg-border" />
+        {/* Стори 12.4 (AC-5): фильтры смысла встречи. Отдельная группа от
+            категорий места — это разные оси (ADR-20). `aria-pressed` на
+            каждой кнопке: состояние читается скринридером, не только цветом. */}
+        {KINDS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => selectKind(kind === item.value ? null : item.value)}
+            aria-pressed={kind === item.value}
+            className={`min-h-11 rounded-full border px-3 text-sm ${
+              kind === item.value
+                ? "border-accent bg-surface font-medium text-accent"
+                : "border-border text-ink-secondary"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+        <span aria-hidden="true" className="mx-1 h-6 w-px bg-border" />
+        {ACTIVITIES.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => selectActivity(activity === item.value ? null : item.value)}
+            aria-pressed={activity === item.value}
+            className={`min-h-11 rounded-full border px-3 text-sm ${
+              activity === item.value
                 ? "border-accent bg-surface font-medium text-accent"
                 : "border-border text-ink-secondary"
             }`}
@@ -208,7 +289,7 @@ export function CardFeed() {
               setState({ kind: "loading" });
               void refresh();
             }}
-            className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:bg-surface"
+            className="min-h-11 rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-hover"
           >
             Попробовать снова
           </button>
@@ -254,7 +335,7 @@ export function CardFeed() {
               type="button"
               onClick={() => void loadMore()}
               disabled={loadingMore}
-              className="min-h-11 self-center rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:bg-surface disabled:opacity-60"
+              className="min-h-11 self-center rounded-md border border-border px-4 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-hover disabled:opacity-60"
             >
               {loadingMore ? "Загружаем…" : "Ещё"}
             </button>

@@ -259,3 +259,126 @@ def _alert_with(client: httpx.AsyncClient) -> Any:
         return client
 
     return _send
+
+
+# --- Стори 11.10 (AC-4): признак `backup: stale` -----------------------------
+#
+# `stale` приходит с кодом 200 (задача 4.3: деградация бэкапа не отказ
+# сервиса), поэтому без разбора ТЕЛА сигнал не виден никому. Три теста ниже
+# разделяют три исхода: `stale` → алерт со своим ключом; `fail:...` → тишина
+# (инцидент хранилища, не бэкапа); `ok` → тишина.
+
+
+def _client_with_backup(status: str) -> httpx.AsyncClient:
+    """Транспорт: `/health/deep` отвечает 200 с заданным `checks.backup`."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"status": "ok", "checks": {"db": "ok", "redis": "ok", "backup": status}},
+        )
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+
+
+async def test_stale_backup_sends_alert_with_own_dedup_key(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A-10 (AC-4): `backup: stale` при HTTP 200 → алерт с ключом `alert:backup_stale:sent`.
+
+    **Почему ключ проверяется отдельно от факта отправки.** Общий ключ с
+    `alert:health:sent` дал бы взаимное глушение: инцидент бэкапа и инцидент
+    доступности — разные события с разными действиями дежурного, а дедуп
+    часа пропустил бы второе. Проверка «алерт ушёл» без проверки ключа
+    зеленела бы и при общем ключе.
+    """
+    redis = _FakeRedis()
+    calls: list[dict[str, Any]] = []
+
+    async def _capture(text: str, *, key: str, redis: Any, client: Any = None) -> bool:
+        calls.append({"text": text, "key": key})
+        return True
+
+    monkeypatch.setattr(probe_module, "send_alert", _capture)
+
+    async with _client_with_backup("stale") as client:
+        result = await probe_module.run_once(redis, client=client)
+
+    assert result is True, "stale — деградация бэкапа, а не отказ сервиса"
+    assert len(calls) == 1
+    assert calls[0]["key"] == probe_module.BACKUP_ALERT_KEY
+    assert calls[0]["key"] != probe_module.HEALTH_ALERT_KEY
+    assert "backup" in calls[0]["text"] and "stale" in calls[0]["text"]
+
+
+async def test_ok_backup_does_not_alert(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-4: свежий бэкап → тишина. Без этой стороны алерт слался бы всегда."""
+    redis = _FakeRedis()
+    calls: list[dict[str, Any]] = []
+
+    async def _capture(text: str, *, key: str, redis: Any, client: Any = None) -> bool:
+        calls.append({"text": text, "key": key})
+        return True
+
+    monkeypatch.setattr(probe_module, "send_alert", _capture)
+
+    async with _client_with_backup("ok") as client:
+        await probe_module.run_once(redis, client=client)
+
+    assert calls == []
+
+
+async def test_backup_storage_failure_does_not_alert_as_stale(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-4: `backup: fail:...` (S3 недоступен) — НЕ алерт «бэкап устарел».
+
+    `fail` означает инцидент хранилища, у которого свои действия дежурного.
+    Слить его со `stale` значило бы послать человека проверять cron, когда легло
+    S3. Отсутствие сигнала здесь намеренное; `fail` виден в `checks` живого
+    `/health/deep`, и его алертинг — отдельное требование, которого AC-4 не
+    содержит.
+    """
+    redis = _FakeRedis()
+    calls: list[dict[str, Any]] = []
+
+    async def _capture(text: str, *, key: str, redis: Any, client: Any = None) -> bool:
+        calls.append({"text": text, "key": key})
+        return True
+
+    monkeypatch.setattr(probe_module, "send_alert", _capture)
+
+    async with _client_with_backup("fail:EndpointConnectionError") as client:
+        await probe_module.run_once(redis, client=client)
+
+    assert calls == []
+
+
+async def test_body_without_checks_does_not_crash_probe(
+    configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-4: неразобранное или чужое тело не должно гасить probe.
+
+    Разбор тела появился ради одного поля. Если бы любая другая форма тела
+    считалась ошибкой, смена формата `/health/deep` погасила бы воркер — то
+    есть проверка наблюдаемости сама стала бы единой точкой отказа.
+    """
+    redis = _FakeRedis()
+    calls: list[dict[str, Any]] = []
+
+    async def _capture(text: str, *, key: str, redis: Any, client: Any = None) -> bool:
+        calls.append({"text": text, "key": key})
+        return True
+
+    monkeypatch.setattr(probe_module, "send_alert", _capture)
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "ok"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+        result = await probe_module.run_once(redis, client=client)
+
+    assert result is True
+    assert calls == []

@@ -38,7 +38,7 @@ NOW = datetime(2026, 10, 23, 22, 0, tzinfo=UTC)
 class _Settings:
     """Минимум настроек: срез сообщества и стоп-слова (CR 4.3, патч 1)."""
 
-    default_community_slug = "tomsk"
+    default_city_slug = "tomsk"
     card_content_stop_words = ("казино", "займ")
 
 
@@ -59,7 +59,7 @@ class _FakeRepository:
         self._card = card
 
     async def get_for_moderation(
-        self, card_uuid: uuid_lib.UUID, *, community_slug: str
+        self, card_uuid: uuid_lib.UUID, *, city_slug: str
     ) -> EventCard | None:
         # CR 4.3, патч 2: срез сообщества обязателен в сигнатуре.
         # Фейк отдаёт карточку независимо от слага — срез проверяется
@@ -76,7 +76,7 @@ def _card(
     """Карточка в памяти: только поля, которые читает сервис модерации."""
     return EventCard(
         author_id=1,
-        community_slug="tomsk",
+        city_slug="tomsk",
         title="Кино в пятницу",
         description=None,
         category="cinema",

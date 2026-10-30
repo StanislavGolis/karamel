@@ -170,7 +170,7 @@ async def create_place_endpoint(
     в `PlaceCreate` и берётся из `server_default`/Python-дефолта модели.
 
     Второй проверки дубля здесь нет (D-1 стори 3.1): правило живёт в сервисе
-    и в `uq_places_community_name`, роутер только отображает ошибку.
+    и в `uq_places_city_name`, роутер только отображает ошибку.
     """
     try:
         place = await create_place(
@@ -178,7 +178,7 @@ async def create_place_endpoint(
             name=payload.name,
             category=payload.category,
             address_text=payload.address_text,
-            community_slug=payload.community_slug,
+            city_slug=payload.city_slug,
             settings=settings,
         )
     except (
@@ -213,7 +213,7 @@ async def update_place_endpoint(
     сообщил бы «сохранено» без единой правки, и клиент считал бы изменение
     применённым.
 
-    `community_slug` в теле отбивается схемой (`extra="forbid"`, R-05) —
+    `city_slug` в теле отбивается схемой (`extra="forbid"`, R-05) —
     перенос между сообществами запрещён.
     """
     place = await _get_place(session, place_uuid)

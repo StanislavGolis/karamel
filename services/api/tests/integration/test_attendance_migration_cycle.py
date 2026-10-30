@@ -32,6 +32,8 @@ from alembic import command
 
 pytestmark = [
     pytest.mark.integration,
+    # Стори 12.9 (AC-4, W-11.4-d): DDL на общей схеме — несовместим с xdist.
+    pytest.mark.ddl,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
 
@@ -109,7 +111,7 @@ async def _seed_attendance_row() -> str:
                 await connection.execute(
                     text(
                         "INSERT INTO places (name, category, address_text, "
-                        "community_slug, is_active) "
+                        "city_slug, is_active) "
                         "VALUES (:name, 'cafe', 'addr', 'tomsk', true) RETURNING id"
                     ),
                     {"name": f"CR-cycle-{suffix}"},
@@ -119,7 +121,7 @@ async def _seed_attendance_row() -> str:
                 await connection.execute(
                     text(
                         "INSERT INTO users (uuid, provider, provider_user_id, phone, role, status, "
-                        "age_confirmed, consent_given_at, community_slug) "
+                        "age_confirmed, consent_given_at, city_slug) "
                         "VALUES (gen_random_uuid(), 'phone', :pid, :phone, 'user', 'active', "
                         "true, now(), 'tomsk') RETURNING id"
                     ),
@@ -133,7 +135,7 @@ async def _seed_attendance_row() -> str:
                 await connection.execute(
                     text(
                         "INSERT INTO users (uuid, provider, provider_user_id, phone, role, status, "
-                        "age_confirmed, consent_given_at, community_slug) "
+                        "age_confirmed, consent_given_at, city_slug) "
                         "VALUES (gen_random_uuid(), 'phone', :pid, :phone, 'user', 'active', "
                         "true, now(), 'tomsk') RETURNING id"
                     ),
@@ -146,12 +148,13 @@ async def _seed_attendance_row() -> str:
             card_id = (
                 await connection.execute(
                     text(
-                        "INSERT INTO event_cards (author_id, place_id, community_slug, title, "
+                        "INSERT INTO event_cards (author_id, place_id, city_slug, title, "
                         "category, starts_at, capacity, decision_window_minutes, expires_at, "
-                        "status, filled_count, verification_status, published_at) "
+                        "status, filled_count, verification_status, published_at, kind, activity) "
                         "VALUES (:author, :place, 'tomsk', :title, 'cafe', "
                         "now() + interval '3 days', 4, 2880, "
-                        "now() + interval '1 day', 'published', 1, 'approved', now()) "
+                        "now() + interval '1 day', 'published', 1, 'approved', now(),"
+                        "'company', 'other') "
                         "RETURNING id"
                     ),
                     {"author": author_id, "place": place_id, "title": f"CR-cycle-{suffix}"},

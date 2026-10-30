@@ -65,16 +65,16 @@ def test_release_seat_statement_sets_published_and_decrements_in_one_update() ->
     assert "returning" in sql.lower()
 
 
-def test_release_seat_statement_does_not_touch_card_of_other_community() -> None:
+def test_release_seat_statement_does_not_touch_card_of_other_city() -> None:
     """AC-08 (ADR-13): срез сообщества живёт в чтении, а не в `UPDATE`.
 
     Тест-инвариант: `build_release_seat_statement` работает по внутреннему
-    `id` и НЕ должен обзавестись `community_slug` — иначе вторая копия
+    `id` и НЕ должен обзавестись `city_slug` — иначе вторая копия
     среза разошлась бы с `get_card_for_join` при правке (класс дефекта 3.3).
     """
     sql = _sql(EventCardRepository.build_release_seat_statement(card_id=CARD_ID))
 
-    assert "community_slug" not in sql
+    assert "city_slug" not in sql
     assert "author_id" not in sql
 
 

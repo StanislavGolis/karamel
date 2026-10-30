@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Путь к .env строится безопасно: в контейнере файл лежит в /app/app/core/config.py,
@@ -23,11 +23,23 @@ if len(_THIS.parents) > 4:
     _CANDIDATES.append(_THIS.parents[4] / ".env")  # локально: корень репозитория
 _ENV_FILES = tuple(str(p) for p in _CANDIDATES)
 
-# AC-03 (Task 2.4): тот же шаблон стоит в `ck_places_community_slug`. Две копии
+# AC-03 (Task 2.4): тот же шаблон стоит в `ck_places_city_slug`. Две копии
 # намеренно: конфиг проверяет `.env` до подключения к БД, а CHECK держит
 # инвариант для вставок сырым SQL и из воркера. Расхождение шаблонов дало бы
 # `500` на сохранении — Pydantic пропустил, PostgreSQL отверг.
-_COMMUNITY_SLUG_RE = re.compile(r"[a-z0-9_-]{3,64}")
+_CITY_SLUG_RE = re.compile(r"[a-z0-9_-]{3,64}")
+
+# Стори 11.4, Task 3.2 (AC-3): формат версии текста правил. `1.0`, `1.2`, `10.11`.
+# Регулярка живёт рядом с `_CITY_SLUG_RE` по той же причине: значение уходит
+# в юридически значимое поле БД, и ошибка конфигурации обязана валить старт,
+# а не сохраняться как «версия, которую нельзя сопоставить с редакцией».
+#
+# `re.ASCII` (CR 11.4): без него `\d` в Python Unicode-aware, и
+# `MODERATION_RULES_VERSION=١.٢` (арабско-индийские цифры) или `１.０`
+# (полноширинные) прошли бы `fullmatch` и попали в `users.consent_version`
+# как «валидная версия». Сопоставить такую строку с редакцией текста нельзя —
+# ровно тот класс дефекта, ради которого валидатор существует.
+_RULES_VERSION_RE = re.compile(r"\d+\.\d+", re.ASCII)
 
 # Стори 4.4, Task 1 (AC-02, FR71): диапазон лимита активных карточек автора.
 # FR71 говори�� «параметр 1–2» — вне этого диапазона значение бессмысленно:
@@ -169,22 +181,30 @@ class Settings(BaseSettings):
     )
 
     # Стори 3.1 (AC-03, ADR-01, D-3): сообщества пилота — срез данных, не таблица.
-    # `places.community_slug` — колонка-строка с regex-CHECK, FK на `communities`
+    # `places.city_slug` — колонка-строка с regex-CHECK, FK на `communities`
     # нет: в пилоте одно сообщество (NFR46), а таблица-справочник из одной строки
     # дала бы `join` в каждом запросе без выигрыша.
     #
     # Список нужен сервису: без сверки с ним опечатка в слаге создаёт место,
-    # которого не видно ни в одной ленте (`WHERE community_slug = ...` не
+    # которого не видно ни в одной ленте (`WHERE city_slug = ...` не
     # совпадёт), — «невидимое сообщество» без единой ошибки в логах.
     # `NoDecode` обязателен по той же причине, что у `pilot_city_bbox`:
     # pydantic-settings разбирает tuple из окружения как JSON ещё до
-    # валидаторов, и `COMMUNITY_SLUGS=tomsk,kemerovo` роняло бы старт
+    # валидаторов, и `CITY_SLUGS=tomsk,kemerovo` роняло бы старт
     # `SettingsError`. JSON в `.env` нечитаем для владельца.
-    community_slugs: Annotated[tuple[str, ...], NoDecode] = ("tomsk",)
+    city_slugs: Annotated[tuple[str, ...], NoDecode] = ("tomsk",)
     # AC-03: значение по умолчанию для создания места без явного слага.
-    # Обязано входить в `community_slugs`, иначе сервис отказывает на
+    # Обязано входить в `city_slugs`, иначе сервис отказывает на
     # собственном дефолте — проверка на старте, а не на первом сохранении.
-    default_community_slug: str = "tomsk"
+    default_city_slug: str = "tomsk"
+    # Стори 12.1 (AC-6, ADR-23, NFR48): зона пилотного города. Нужна, чтобы
+    # `starts_at` (UTC в БД) отображался по-разному в двух городах: при
+    # масштабировании на несколько городов одна зона на приложение — та же
+    # ложь, что `community_slug` вместо `city_slug`. Значение проверяется
+    # `ZoneInfo` на старте (см. `_validate_city_timezone`), а не в момент
+    # первого запроса: `ZoneInfoNotFoundError` посреди ленты — это `500`
+    # на валидной форме, а не ошибка конфигурации.
+    city_timezone: str = "Asia/Tomsk"
 
     # Стори 4.1, Task 5.1 (AC-03, OQ-1): окно решения по умолчанию для режима
     # «открытый набор» (вместимость 2–6). FR70 прямо говорит, что в этом
@@ -284,12 +304,33 @@ class Settings(BaseSettings):
     # защиту, поэтому валидатор ниже требует `>= 2` (D-10.7-2).
     alert_consecutive_failures: int = 2
 
+    # Стори 11.4 (AC-3, NFR36, долг `W-10.4-b`): версия текста правил, которую
+    # фиксирует `POST /consent` в `users.consent_version`.
+    #
+    # **Источник истины — `MODERATION_RULES_VERSION` в**
+    # `apps/web/src/lib/moderation-rules.ts`: текст правил живёт в коде
+    # фронтенда осознанно (D-10.4-1 — правила обязаны открываться до
+    # регистрации при любом состоянии бэкенда). API не может импортировать
+    # TS-константу, поэтому значение дублируется здесь и **сверяется тестом**
+    # `tests/unit/test_rules_version_alignment.py`. Расхождение — красный тест,
+    # а не тихо записанная в БД ложная версия.
+    #
+    # Почему настройка, а не литерал в сервисе: AC-3 прямо запрещает константу
+    # в коде, а бамп версии правил не должен требовать пересборки образа
+    # (`.env` меняется без неё, §18.6).
+    #
+    # `validate_default=True` (CR 11.4): без него Pydantic v2 НЕ валидирует
+    # дефолт — правка литерала на `"1.0-beta"` прошла бы старт молча и попала
+    # в БД. Проверено замером: до правки `Settings.model_fields[...]
+    # .validate_default` был `None`.
+    moderation_rules_version: str = Field(default="1.0", validate_default=True)
+
     # Стори 4.3, Task 2 (AC-02, FR91, D-4.3-1): стоп-слова автопроверки
     # карточки. Значения — ДАННЫЕ, а не код: FR91 требует менять поведение без
     # правок кода, а деплой по §18.6 — только полная пересборка образа; `.env`
     # меняется без пересборки.
     #
-    # `NoDecode` обязателен по той же причине, что у `community_slugs`:
+    # `NoDecode` обязателен по той же причине, что у `city_slugs`:
     # pydantic-settings разбирает complex-типы (tuple) как JSON, и обычная
     # строка `казино,займ` падала бы на JSONDecodeError при старте.
     #
@@ -339,6 +380,24 @@ class Settings(BaseSettings):
     # AC-05, AC-08: предел размера самого файла (не тела multipart).
     # 5 МиБ — типичный кадр телефона после сжатия; больше — OOM контейнера.
     max_photo_bytes: int = 5_242_880
+
+    # Стори 11.10 (AC-2, AC-4): ОТДЕЛЬНЫЙ бакет под дампы БД. Не переиспользуем
+    # `s3_*` выше: тот бакет (`karamel-media`) хранит фото профилей и живёт по
+    # своим правилам доступа; дамп — вся база. Смешать = либо дампы в бакете с
+    # публичной политикой, либо сломанная загрузка фото (граница 1 Dev Notes).
+    #
+    # Пустые значения в dev — норма, как у `s3_*`: `backup_freshness` вернёт
+    # `fail:NotConfigured`, а не ложный `stale` (Task 4.2). Вне dev пустые
+    # реквизиты не роняют старт: канал бэкапа живёт в cron на хосте, и падение
+    # api из-за него было бы отказом продукта ради диагностики.
+    s3_backup_endpoint: str = ""
+    s3_backup_region: str = ""
+    s3_backup_bucket: str = ""
+    s3_backup_access_key: str = ""
+    # Секрет попадает в `Settings`, который печатается при диагностике, —
+    # поэтому имя обязано быть в редакции логов (`logging.py`, прецедент
+    # `s3_secret_key` из Task 2.2a стори 2.2). Проверяется тестом Task 4.
+    s3_backup_secret_key: str = ""
 
     @field_validator("session_cookie_domain", mode="before")
     @classmethod
@@ -428,9 +487,9 @@ class Settings(BaseSettings):
             raise ValueError("PILOT_CITY длиннее 100 символов: не влезет в profiles.city")
         return raw
 
-    @field_validator("community_slugs", mode="before")
+    @field_validator("city_slugs", mode="before")
     @classmethod
-    def _parse_community_slugs(cls, v: object) -> object:
+    def _parse_city_slugs(cls, v: object) -> object:
         """AC-03 (Task 2.3): разбор `tomsk,kemerovo` и нормализация каждого слага.
 
         Порядок шагов повторяет `pilot_city_bbox` (разбор строки) и `pilot_city`
@@ -441,7 +500,7 @@ class Settings(BaseSettings):
         `normalize_text`, каким сервис нормализует вход (CR 2.6, патч 1).
 
         Регистр НЕ приводится (D-5): шаблон `^[a-z0-9_-]{3,64}$` требует
-        нижний регистр, и `COMMUNITY_SLUGS=Tomsk` должен падать, а не тихо
+        нижний регистр, и `CITY_SLUGS=Tomsk` должен падать, а не тихо
         превращаться в `tomsk` — иначе значение в `.env` расходится
         с тем, что реально используется.
         """
@@ -458,24 +517,24 @@ class Settings(BaseSettings):
         normalized = tuple(chunk for chunk in normalized if chunk)
         if not normalized:
             raise ValueError(
-                "COMMUNITY_SLUGS не может быть пустым: без сообщества создание "
+                "CITY_SLUGS не может быть пустым: без сообщества создание "
                 "места отказывает всегда (AC-03)"
             )
         for chunk in normalized:
-            if not _COMMUNITY_SLUG_RE.fullmatch(chunk):
+            if not _CITY_SLUG_RE.fullmatch(chunk):
                 raise ValueError(
-                    "COMMUNITY_SLUGS: каждый слаг должен соответствовать "
-                    f"^[a-z0-9_-]{{3,64}}$ (как ck_places_community_slug); получено: {chunk!r}"
+                    "CITY_SLUGS: каждый слаг должен соответствовать "
+                    f"^[a-z0-9_-]{{3,64}}$ (как ck_places_city_slug); получено: {chunk!r}"
                 )
         return normalized
 
-    @field_validator("default_community_slug", mode="before")
+    @field_validator("default_city_slug", mode="before")
     @classmethod
-    def _normalize_default_community_slug(cls, v: object) -> object:
+    def _normalize_default_city_slug(cls, v: object) -> object:
         """AC-03: дефолт нормализуется тем же кодом, что и список сообществ.
 
-        Без этого `DEFAULT_COMMUNITY_SLUG=" tomsk"` не нашёлся бы в
-        `community_slugs` и ронял старт на ровном месте — при том что
+        Без этого `DEFAULT_CITY_SLUG=" tomsk"` не нашёлся бы в
+        `city_slugs` и ронял старт на ровном месте — при том что
         значение валидное, просто с пробелом из `.env`.
         """
         if not isinstance(v, str):
@@ -483,6 +542,27 @@ class Settings(BaseSettings):
         from app.services.profile_normalize import normalize_text
 
         return normalize_text(v)
+
+    @field_validator("city_timezone")
+    @classmethod
+    def _validate_city_timezone(cls, v: str) -> str:
+        """AC-6: зона города существует в базе IANA.
+
+        Проверка на старте, а не на первом отображении: `ZoneInfoNotFoundError`
+        в середине сборки ленты даёт `500` на валидном запросе, и причину
+        видно только по трейсбеку. `ZoneInfo` без `tzdata` в контейнере
+        тоже падает здесь — это ошибка образа, и узнать о ней надо при
+        запуске, а не при первом показе карточки.
+        """
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(
+                f"CITY_TIMEZONE: зона {v!r} отсутствует в базе IANA: {exc}"
+            ) from exc
+        return v
 
     @field_validator("card_default_decision_window_minutes")
     @classmethod
@@ -664,12 +744,42 @@ class Settings(BaseSettings):
             raise ValueError(f"ALERT_CONSECUTIVE_FAILURES должен быть >= 2, получено {v}")
         return v
 
+    @field_validator("moderation_rules_version", mode="before")
+    @classmethod
+    def _validate_moderation_rules_version(cls, v: object) -> object:
+        r"""Стори 11.4, Task 3.2 (AC-3, NFR36): формат версии правил — `\d+.\d+`.
+
+        Значение уходит в `users.consent_version VARCHAR(16)` и читается
+        модератором как «какую редакцию человек подтвердил». Опечатка
+        (`v1`, `1.0-beta`, `1,0`) записала бы в юридически значимое поле
+        строку, которую нельзя сопоставить ни с одной редакцией текста.
+
+        Поэтому ошибка конфигурации роняет старт, а не сохраняется молча —
+        тот же принцип, что у `PILOT_CITY` и `CITY_SLUGS`. Верхняя граница
+        16 символов дублирует ширину колонки: расхождение дало бы `500`
+        в момент принятия согласия, то есть в худший возможный момент.
+        """
+        if not isinstance(v, str):
+            return v
+        normalized = v.strip()
+        if len(normalized) > 16:
+            raise ValueError(
+                "MODERATION_RULES_VERSION длиннее 16 символов: не влезет "
+                f"в users.consent_version VARCHAR(16); получено: {normalized!r}"
+            )
+        if not _RULES_VERSION_RE.fullmatch(normalized):
+            raise ValueError(
+                "MODERATION_RULES_VERSION обязан иметь вид «X.Y» "
+                f"(например, 1.0) — иначе версия не сопоставима с редакцией текста; получено: {v!r}"
+            )
+        return normalized
+
     @field_validator("card_content_stop_words", mode="before")
     @classmethod
     def _parse_content_stop_words(cls, v: object) -> object:
         """AC-02, FR91: разбор `казино,займ` и нормализация каждого слова.
 
-        `NoDecode` отдаёт строку как есть (тот же приём, что у `community_slugs`):
+        `NoDecode` отдаёт строку как есть (тот же приём, что у `city_slugs`):
         pydantic-settings иначе попытался бы разобрать её как JSON.
 
         Нормализация тем же `normalize_text`, каким сервис нормализует текст
@@ -698,18 +808,18 @@ class Settings(BaseSettings):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_community(self) -> "Settings":
+    def _validate_city(self) -> "Settings":
         """AC-03: дефолтное сообщество обязано входить в список сообществ.
 
-        Проверка на старте, а не в момент создания места: `DEFAULT_COMMUNITY_SLUG`
-        вне `community_slugs` означает, что `POST /places` без явного слага
+        Проверка на старте, а не в момент создания места: `DEFAULT_CITY_SLUG`
+        вне `city_slugs` означает, что `POST /places` без явного слага
         отказывает всегда — админка 3.2 не работает вовсе. Такое состояние
         должно ронять старт, а не выясняться на первом живом сохранении.
         """
-        if self.default_community_slug not in self.community_slugs:
+        if self.default_city_slug not in self.city_slugs:
             raise ValueError(
-                "DEFAULT_COMMUNITY_SLUG должен входить в COMMUNITY_SLUGS: "
-                f"{self.default_community_slug!r} отсутствует в {self.community_slugs!r}"
+                "DEFAULT_CITY_SLUG должен входить в CITY_SLUGS: "
+                f"{self.default_city_slug!r} отсутствует в {self.city_slugs!r}"
             )
         return self
 
