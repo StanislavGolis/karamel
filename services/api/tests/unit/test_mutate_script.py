@@ -26,7 +26,15 @@ import pytest
 
 #: Инструмент лежит ВНЕ `services/api` (репозиторный `scripts/`): он общий
 #: для всех сервисов, а не принадлежит API.
-MUTATE = Path(__file__).resolve().parents[5] / "scripts" / "mutate.py"
+#:
+#: `parents[4]`, а не `parents[5]` (CI run 41137571125). До правки путь вёл
+#: на уровень ВЫШЕ корня репозитория — в каталог, которого в раннере нет.
+#: Локально `mutate.py` там случайно лежал, и 7 тестов исполнялись; в CI
+#: условие `skipif(not MUTATE.exists())` срабатывало, и весь файл молча
+#: скипался: `3358 passed, 7 skipped` вместо полного прогона. Это долг
+#: `W-12.1-b` («раннер мутаций вне репо») в его худшей форме — тест,
+#: который в CI не проверяет ничего и при этом выглядит зелёным.
+MUTATE = Path(__file__).resolve().parents[4] / "scripts" / "mutate.py"
 
 pytestmark = pytest.mark.skipif(not MUTATE.exists(), reason=f"нет инструмента: {MUTATE}")
 

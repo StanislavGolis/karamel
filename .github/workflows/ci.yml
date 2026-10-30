@@ -113,6 +113,17 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: python -m mypy app
+      # Схема поднимается ЯВНО, а не фикстурой `migrated_database`.
+      #
+      # Причина (CI run 41137571125): `tests/e2e_multiproc/` идёт по алфавиту
+      # ДО `tests/integration/`, а фикстура `migrated_database` объявлена в
+      # `tests/integration/conftest.py` и на чужие каталоги не действует.
+      # Поэтому e2e стартовал на пустой базе и падал «relation "users" does
+      # not exist». Локально дефект невидим: БД уже мигрирована.
+      #
+      # `python -m` (а не `alembic`): тот же вход, что в job `migrations`.
+      - name: Схема БД до головы (иначе e2e стартует на пустой базе)
+        run: python -m alembic upgrade head
       # --strict-markers: опечатка в маркере (`integratio`) падает, а не молчит.
       # -m integration без skip: если бы тесты скипнулись, job должен упасть, а не пройти.
       - run: python -m pytest -q --strict-markers

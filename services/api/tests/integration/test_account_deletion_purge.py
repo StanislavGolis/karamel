@@ -40,6 +40,35 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _no_real_s3(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Глушит настоящий S3 для ВСЕГО файла (CI run 41137571125).
+
+    **Дефект, который это закрывает.** Тесты зовут `purge_due_accounts`,
+    тот — `media_service.delete_object`, а тот — реальный boto3-клиент.
+    Локально `.env` даёт живые креды Timeweb, и удаление несуществующего
+    ключа возвращает идемпотентный `204` — тест зеленеет СЛУЧАЙНО.
+    В CI кредов нет, `s3_bucket` пуст, `delete_object` бросает, сервис
+    считает объект сиротой: `PurgeResult(purged=1, orphaned_objects=1)`,
+    и `test_worker_wrapper_returns_purge_result` падает на `assert 1 == 0`
+    (`:525`) — при том, что проверяемое свойство (обёртка отдаёт
+    `PurgeResult`, а не `int`) цело.
+
+    **Почему это не ослабление.** Единица тестирования — логика удаления
+    в БД, а не доступность внешнего бакета; сетевая зависимость делала
+    результат функцией чужого сервиса и переменных окружения. Тесты,
+    которым нужен СБОЙ хранилища (`test_worker_logs_orphaned_objects`,
+    `test_storage_failure_does_not_rollback_deletion`), ставят свой
+    `monkeypatch` в теле и перекрывают заглушку — их красное состояние
+    не тронуто.
+    """
+
+    async def _noop(_storage_key: str) -> None:
+        return None
+
+    monkeypatch.setattr(media_service, "delete_object", _noop)
+
+
 async def _user(session: AsyncSession, *, expired: bool = True) -> Any:
     """Учётка с пометкой удаления — с истёкшим окном по умолчанию."""
     phone = f"+7908{uuid_lib.uuid4().int % 10**7:07d}"
