@@ -135,7 +135,6 @@ async def test_bad_category_in_request_body_keeps_invalid_request(
     response = await client.post(
         "/api/v1/cards",
         json={
-            "title": "x",
             "category": "movies",
             "starts_at": _future(days=2).isoformat(),
             "capacity": 2,

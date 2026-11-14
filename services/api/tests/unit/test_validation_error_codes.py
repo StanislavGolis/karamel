@@ -101,7 +101,7 @@ def test_invalid_category_returns_code_with_allowed_list() -> None:
     from app.models.enums import PlaceCategory
 
     response = client.post(
-        "/api/v1/places/category-probe", json={"name": "Прага", "category": "bar"}
+        "/api/v1/places/category-probe", json={"name": "Прага", "category": "theatre"}
     )
 
     assert response.status_code == 422
@@ -117,7 +117,7 @@ def test_invalid_category_on_foreign_path_is_not_place_code() -> None:
     становится `category_invalid` с перечнем категорий справочника, и клиент
     анкеты показал бы админу выпадашку «кафе/кино/каток».
     """
-    response = client.post("/api/v1/foreign", json={"name": "Прага", "category": "bar"})
+    response = client.post("/api/v1/foreign", json={"name": "Прага", "category": "theatre"})
 
     assert response.status_code == 422
     assert response.json()["code"] != "category_invalid"

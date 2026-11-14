@@ -150,13 +150,13 @@ describe("docs/runbook-uptime.md", () => {
   });
 
   it("W-11.2-T6: адрес монитора — домен стенда, а не чужой карамель.рф", () => {
-    // Замер 2026-10-27: `карамель.рф` → 95.163.244.136 (openresty, x-cache-status),
-    // это не стенд (129.101.113.246, Caddy). Монитор на том домене получает 403
+    // Замер 2026-10-27: `карамель.рф` → <SERVER_IP_2> (openresty, x-cache-status),
+    // это не стенд (<SERVER_IP>, Caddy). Монитор на том домене получает 403
     // и измеряет чужой сервер — худший дефект этой стори.
     const text = runbook();
 
     expect(text).toContain("xn--j1accp.xn--p1ai");
     expect(text).toMatch(/не путать с/i);
-    expect(text).toContain("95.163.244.136");
+    expect(text).toContain("<SERVER_IP_2>");
   });
 });

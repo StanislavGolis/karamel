@@ -245,6 +245,83 @@ class CommunitySettings(Protocol):
     default_city_slug: str
 
 
+class PlaceHiddenError(Exception):
+    """AC-9 (решение 3, 2026-10-31): имя занято СКРЫТЫМ местом — автору отказ.
+
+    Отдельный класс от `PlaceArchivedError` намеренно. `PlaceArchivedError`
+    несёт `existing_uuid` для модератора: администратор восстанавливает место,
+    и ему нужен адрес. Автору чужое скрытое место не касается — UUID отдавать
+    нельзя, иначе перебором имён (`POST` → `422` без uuid / `200` с uuid)
+    можно узнать, какие скрытые места существуют, то есть получить оракул
+    по данным, которых пользователь не видит (D-6).
+
+    Реактивации нет: `uq_places_city_name` не включает `is_active`, поэтому
+    повторный выбор скрытого места не «поднимает» его — иначе автор одним
+    запросом вернул бы в справочник место, скрытое модератором.
+    """
+
+    code = "PLACE_HIDDEN"
+
+
+async def create_or_get_place(
+    session: AsyncSession,
+    *,
+    name: str,
+    category: PlaceCategory | str,
+    address_text: str,
+    city_slug: str,
+    settings: CommunitySettings | None = None,
+) -> tuple[Place, bool]:
+    """AC-9: место по имени — существующее активное или новое.
+
+    Возвращает `(place, created)`: `False` — активное место уже было. Для
+    автора это УСПЕХ, а не конфликт: он выбирал место из подсказок Nominatim,
+    и повторный выбор того же кинотеатра не должен требовать «придумайте другое
+    название» (урок 3.2: `PLACE_DUPLICATE` — код для администратора).
+
+    Три исхода по имени в городе:
+
+    1. активное есть → `(place, False)`, ноль INSERT;
+    2. скрытое есть → `PlaceHiddenError` (`422 PLACE_HIDDEN`, без `uuid`);
+    3. нет → `create_place`, `(place, True)`.
+
+    Поиск идёт по НОРМАЛИЗОВАННОМУ имени: `create_place` нормализует сам, и
+    без этого поиск `'Кафе „Прага“ '` не нашёл бы сохранённое `'Кафе „Прага“'`,
+    а `uq_places_city_name` вернул бы `IntegrityError` вместо `created: false`.
+
+    SQL не дублируется: `find_by_city_and_name:260` и `create_place` — уже
+    существующие пути (AC-9 «ноль нового SQL»).
+    """
+    if settings is None:
+        from app.core.config import settings as global_settings
+
+        settings = global_settings
+
+    # Сверка слага ДО поиска: иначе для города вне `city_slugs` поиск вернул бы
+    # `None` (строк там нет), и `create_place` отказал бы позже — тем же кодом,
+    # но после лишнего запроса.
+    if city_slug not in settings.city_slugs:
+        raise PlaceUnknownCommunityError(city_slug)
+
+    normalized_name = normalize_text(name)
+    repository = PlaceRepository(session)
+    existing = await repository.find_by_city_and_name(city_slug, normalized_name)
+    if existing is not None:
+        if existing.is_active:
+            return existing, False
+        raise PlaceHiddenError
+
+    place = await create_place(
+        session,
+        name=name,
+        category=category,
+        address_text=address_text,
+        city_slug=city_slug,
+        settings=settings,
+    )
+    return place, True
+
+
 async def create_place(
     session: AsyncSession,
     *,

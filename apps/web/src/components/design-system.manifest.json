@@ -125,6 +125,12 @@
       "wave": 3,
       "passport": 6
     },
+    "PlacePicker": {
+      "path": "cards/place-picker.tsx",
+      "status": "system",
+      "wave": 3,
+      "passport": 6
+    },
     "PersonMini": {
       "path": "ui/person-mini.tsx",
       "status": "system",

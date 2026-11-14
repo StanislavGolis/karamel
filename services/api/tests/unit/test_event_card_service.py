@@ -19,11 +19,13 @@ from app.models.enums import CardVerificationStatus, EventCardStatus
 from app.models.event_card import EventCard
 from app.schemas.event_card import EventCardCreate, EventCardUpdate
 from app.services.event_card_service import (
+    CARD_EDIT_REQUIRES_REVIEW_CODE,
     CARD_LIMIT_REACHED_CODE,
     CARD_REJECTED_CODE,
     CARD_STARTS_AT_TOO_FAR_CODE,
     CARD_VERIFICATION_PENDING_CODE,
     CardDecisionWindowRequiredError,
+    CardEditRequiresReviewError,
     CardLimitReachedError,
     CardNotDraftError,
     CardNotFoundError,
@@ -153,7 +155,6 @@ class _FakeRepository:
 
 def _payload(**overrides: Any) -> EventCardCreate:
     values: dict[str, Any] = {
-        "title": "Настольные игры",
         "category": "cafe",
         "place_uuid": PLACE_UUID,
         "starts_at": STARTS_AT,
@@ -172,6 +173,7 @@ def _card(**overrides: Any) -> EventCard:
         "author_id": 7,
         "place_id": 42,
         "city_slug": "tomsk",
+        # Стори 13.2 (AC-7): title — NOT NULL в БД, в фабрике модели задаётся явно.
         "title": "Настольные игры",
         # Стори 12.4 (AC-1): поля NOT NULL в модели.
         "kind": "company",
@@ -191,19 +193,34 @@ def _card(**overrides: Any) -> EventCard:
 
 @pytest.fixture(autouse=True)
 def _patch_place_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Заменяет обе точки работы с местом: гард и резолв `place_id`.
+    """Заменяет все точки работы с местом: гард, резолв `place_id` и `_resolve_place`.
 
-    Обе обращаются к БД, поэтому обе подменяются в модуле сервиса.
+    Все три обращаются к БД, поэтому все три подменяются в модуле сервиса.
+    `_resolve_place` появился в стори 13.2 (AC-3): заголовку нужна категория
+    места, а не только `place_id`, поэтому сервис читает строку целиком.
+    Заглушка отдаёт объект с теми же тремя полями, которые читает прод-код
+    (`id`, `category`, `name`) — тест не должен зависеть от модели `Place`.
     """
+
+    class _Place:
+        """Минимум полей, которые читает сервис: `id`, `category`, `name`."""
+
+        id = 42
+        category = "cafe"
+        name = "Прага"
 
     async def _ensure(*args: Any, **kwargs: Any) -> None:
         return None
 
-    async def _resolve(*args: Any, **kwargs: Any) -> int:
+    async def _resolve_id(*args: Any, **kwargs: Any) -> int:
         return 42
 
+    async def _resolve(*args: Any, **kwargs: Any) -> _Place:
+        return _Place()
+
     monkeypatch.setattr("app.services.event_card_service.ensure_place_available", _ensure)
-    monkeypatch.setattr("app.services.event_card_service._resolve_place_id", _resolve)
+    monkeypatch.setattr("app.services.event_card_service._resolve_place_id", _resolve_id)
+    monkeypatch.setattr("app.services.event_card_service._resolve_place", _resolve)
 
 
 def _run(coro: Any) -> Any:
@@ -332,7 +349,9 @@ def test_create_stop_word_stays_pending() -> None:
         create_card(
             _FakeSession(),  # type: ignore[arg-type]
             author_id=7,
-            payload=_payload(title="Казино вечером"),
+            # AC-7 стори 13.2: title от автора не принимается, поэтому стоп-слово
+            # проверяется на описании — автопроверка читает склейку title+description.
+            payload=_payload(description="Казино вечером"),
             settings=_Settings(),  # type: ignore[arg-type]
             now=NOW,
             repository=_FakeRepository(),  # type: ignore[arg-type]
@@ -356,7 +375,7 @@ async def test_update_foreign_card_is_not_found() -> None:
             _FakeSession(),  # type: ignore[arg-type]
             author_id=7,
             card_uuid=uuid_lib.uuid4(),
-            payload=EventCardUpdate(title="Новое"),
+            payload=EventCardUpdate(description="Новое"),
             settings=_Settings(),  # type: ignore[arg-type]
             now=NOW,
             repository=_FakeRepository(card=None),  # type: ignore[arg-type]
@@ -377,13 +396,15 @@ async def test_update_published_card_without_joins_is_allowed() -> None:
         _FakeSession(),  # type: ignore[arg-type]
         author_id=7,
         card_uuid=uuid_lib.uuid4(),
-        payload=EventCardUpdate(title="До присоединений"),
+        payload=EventCardUpdate(description="До присоединений"),
         settings=_Settings(),  # type: ignore[arg-type]
         now=NOW,
         repository=_FakeRepository(card=card),  # type: ignore[arg-type]
     )
 
-    assert updated.title == "До присоединений"
+    # AC-7 стори 13.2: заголовок теперь генерируется, поэтому «правка прошла»
+    # проверяется на description — единственном свободном текстовом поле.
+    assert updated.description == "До присоединений"
 
 
 async def test_update_title_only_keeps_window_and_capacity() -> None:
@@ -398,13 +419,13 @@ async def test_update_title_only_keeps_window_and_capacity() -> None:
         _FakeSession(),  # type: ignore[arg-type]
         author_id=7,
         card_uuid=uuid_lib.uuid4(),
-        payload=EventCardUpdate(title="Новое название"),
+        payload=EventCardUpdate(description="Новое название"),
         settings=_Settings(),  # type: ignore[arg-type]
         now=NOW,
         repository=_FakeRepository(card=card),  # type: ignore[arg-type]
     )
 
-    assert updated.title == "Новое название"
+    assert updated.description == "Новое название"
     assert updated.capacity == 1
     assert updated.decision_window_minutes == 45
     assert updated.expires_at == NOW + timedelta(minutes=45)
@@ -610,7 +631,7 @@ async def test_update_title_keeps_custom_window_of_open_set() -> None:
         _FakeSession(),  # type: ignore[arg-type]
         author_id=7,
         card_uuid=uuid_lib.uuid4(),
-        payload=EventCardUpdate(title="Новое название"),
+        payload=EventCardUpdate(description="Новое название"),
         settings=_Settings(),  # type: ignore[arg-type]
         now=NOW,
         repository=_FakeRepository(card=card),  # type: ignore[arg-type]
@@ -903,11 +924,226 @@ async def test_update_without_starts_at_still_works() -> None:
         _FakeSession(),  # type: ignore[arg-type]
         author_id=7,
         card_uuid=uuid_lib.uuid4(),
-        payload=EventCardUpdate(title="Новое название"),
+        payload=EventCardUpdate(description="Новое название"),
         settings=_Settings(),  # type: ignore[arg-type]
         now=NOW,
         repository=_FakeRepository(card=card),  # type: ignore[arg-type]
     )
 
-    assert updated.title == "Новое название"
+    assert updated.description == "Новое название"
     assert updated.starts_at == card.starts_at
+
+
+# --- Стори 13.2 (CR 13.2 H-1, H-3): ЗАГОЛОВОК В СЕРВИСНОМ ПУТИ -----------------
+#
+# **Зачем отдельный блок.** До CR ревью заголовок проверялся только как чистая
+# функция (`test_card_title.py`). Сервисный путь — `create_card` и `update_card` —
+# не был заперт ничем: мутации M12 (смена места не пересобирает), M13 (`other`
+# перетирается), M14 (генерации при создании нет) ВЫЖИВАЛИ, а `PATCH` только
+# активности не пересобирал заголовок вовсе (H-1, блокер вердикта).
+#
+# Продуктовое следствие H-1: автор менял «кофе» на «кино», а карточка в ленте
+# продолжала называться «Кофе в кафе „Прага“» — AC-3 нарушен на пути правки.
+
+
+def _patch_place_by_id(monkeypatch: pytest.MonkeyPatch, *, name: str, category: str) -> None:
+    """Подменяет `PlaceRepository.get_by_id` — единственный запрос блока пересборки.
+
+    При `PATCH` только активности место не перепроверяется: `place_id` карточки
+    уже валиден, а `payload` места не содержит. Сервис читает строку по `id`,
+    поэтому подменяется именно этот метод, а не `_resolve_place` (тот вызывается
+    лишь при смене места).
+    """
+    from app.repositories.places import PlaceRepository
+
+    class _Place:
+        id = 42
+
+    async def _get_by_id(self: Any, place_id: int) -> Any:
+        place = _Place()
+        place.category = category
+        place.name = name
+        return place
+
+    monkeypatch.setattr(PlaceRepository, "get_by_id", _get_by_id)
+
+
+def test_create_builds_title_from_activity_and_place() -> None:
+    """AC-3, H-3 M14: `create_card` САМ собирает заголовок из активности и места.
+
+    Краснеет, если убрать вызов `generate_card_title` из `create_card` или
+    подставить вместо него заглушку: `title` остался бы пустым (или упало бы
+    `NOT NULL` в БД), а карточка ушла бы в `pending` по правилу `length`.
+    """
+    card = _run(
+        create_card(
+            _FakeSession(),  # type: ignore[arg-type]
+            author_id=7,
+            # Активность НЕ дефолтная: дефолт фабрики — `boardgames`, и совпадение
+            # с ним не отличило бы «взято из активности» от «взято из константы».
+            payload=_payload(activity="coffee"),
+            settings=_Settings(),  # type: ignore[arg-type]
+            now=NOW,
+            repository=_FakeRepository(),  # type: ignore[arg-type]
+        )
+    )
+
+    assert card.title == "Кофе в кафе „Прага“"
+
+
+@pytest.mark.asyncio
+async def test_patch_activity_only_rebuilds_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-3, V-2, CR H-1 (БЛОКЕР): `PATCH` ТОЛЬКО активности пересобирает заголовок.
+
+    **Воспроизведённый дефект.** `effective_activity` читался как
+    `Activity(card.activity)` — ДО присвоения `card.activity` (оно ниже, после
+    автопроверки). `PATCH {"activity": "cinema"}` при `coffee` оставлял
+    заголовок «Кофе в кафе „Прага“».
+
+    Краснеет при возврате к `Activity(card.activity)`: заголовок остаётся
+    старым, а `capability` карточки меняется — лента называет встречу кофе,
+    хотя внутри кино.
+    """
+    _patch_place_by_id(monkeypatch, name="Прага", category="cafe")
+    card = _card(activity="coffee", title="Кофе в кафе „Прага“")
+
+    updated = await update_card(
+        _FakeSession(),  # type: ignore[arg-type]
+        author_id=7,
+        card_uuid=uuid_lib.uuid4(),
+        payload=EventCardUpdate(activity="cinema"),
+        settings=_Settings(),  # type: ignore[arg-type]
+        now=NOW,
+        repository=_FakeRepository(card=card),  # type: ignore[arg-type]
+    )
+
+    assert updated.activity == "cinema"
+    assert updated.title == "Кино в кафе „Прага“", f"заголовок не пересобран: {updated.title!r}"
+
+
+@pytest.mark.asyncio
+async def test_patch_place_only_rebuilds_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-3, V-2, H-3 M12: `PATCH` только места пересобирает заголовок.
+
+    Краснеет, если снять блок пересборки (`if False:`): карточка «Кофе в кафе
+    „Прага“» переживёт смену места на бар и будет врать о месте встречи.
+    """
+    from app.services import event_card_service as service_module
+
+    class _Place:
+        id = 99
+        category = "bar"
+        name = "Бар Прага"
+
+    async def _resolve(*args: Any, **kwargs: Any) -> Any:
+        return _Place()
+
+    # Место читается `_resolve_place` (смена места), а не `get_by_id` —
+    # подменяется именно этот путь, иначе тест ушёл бы в БД.
+    monkeypatch.setattr(service_module, "_resolve_place", _resolve)
+    card = _card(activity="coffee", title="Кофе в кафе „Прага“")
+
+    updated = await update_card(
+        _FakeSession(),  # type: ignore[arg-type]
+        author_id=7,
+        card_uuid=uuid_lib.uuid4(),
+        payload=EventCardUpdate(place_uuid=uuid_lib.uuid4()),
+        settings=_Settings(),  # type: ignore[arg-type]
+        now=NOW,
+        repository=_FakeRepository(card=card),  # type: ignore[arg-type]
+    )
+
+    assert updated.place_id == 99
+    assert updated.title == "Кофе в баре „Бар Прага“", (
+        f"заголовок не пересобран под новое место: {updated.title!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_place_on_legacy_other_keeps_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-6, H-3 M13: легаси `other` НЕ перетирает существующий заголовок.
+
+    Генератор на `Activity.OTHER` бросает `ValueError` — если снять проверку
+    `is not Activity.OTHER`, `PATCH` места у легаси-карточки падал бы `500`.
+    Проверяется и то, что заголовок остался прежним: перетирать его нельзя,
+    у такой карточки активности нет, и собрать осмысленный заголовок не из чего.
+    """
+    card = _card(activity="other", title="Старый заголовок")
+
+    updated = await update_card(
+        _FakeSession(),  # type: ignore[arg-type]
+        author_id=7,
+        card_uuid=uuid_lib.uuid4(),
+        payload=EventCardUpdate(place_uuid=uuid_lib.uuid4()),
+        settings=_Settings(),  # type: ignore[arg-type]
+        now=NOW,
+        repository=_FakeRepository(card=card),  # type: ignore[arg-type]
+    )
+
+    assert updated.title == "Старый заголовок", f"легаси-заголовок перетёрт: {updated.title!r}"
+
+
+@pytest.mark.asyncio
+async def test_patch_place_with_stop_word_checks_rebuilt_title(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """N-1 (CR 13.2 r2): автопроверка видит ПЕРЕСОБРАННЫЙ заголовок, не старый.
+
+    **Дыра, которую закрывает тест.** Порядок в `update_card` верный: заголовок
+    пересобирается (`:739-743`) ВЫШЕ автопроверки (`:756-761`), и в `CardContent`
+    уходит уже новый текст. Но это не было заперто ничем: заме�� CR — подмена
+    `CardContent(title=card.title, ...)` на константу дала **62 passed**.
+
+    **Почему это важно.** Если блок пересборки перенесут НИЖЕ автопроверки
+    (естественный рефакторинг «сначала присвоить поля, потом проверить»),
+    карточка, переехавшая на место с запрещённым именем, пройдёт проверку по
+    СТАРОМУ тексту и останется в ленте с «Казино» в заголовке.
+
+    Сценарий: ОПУБЛИКОВАННАЯ карточка («Настольные игры», место «Прага»)
+    переезжает на место «Казино». Новый заголовок «Настольные игры в кафе
+    „Казино“» содержит стоп-слово (`card_content_stop_words` теста = «казино»).
+    Публикация не редактируема без повторной проверки → `CardEditRequiresReviewError`,
+    и заголовок в модели остаётся прежним (отказ без мутаций).
+
+    Краснеет, если проверять старый `title`: «Настольные игры» правило пройдёт,
+    отказа не будет, и карточка уйдёт в ленту с запрещённым именем места.
+    """
+    from app.services import event_card_service as service_module
+
+    class _StopWordPlace:
+        id = 77
+        category = "cafe"
+        name = "Казино"
+
+    async def _resolve(*args: Any, **kwargs: Any) -> Any:
+        return _StopWordPlace()
+
+    monkeypatch.setattr(service_module, "_resolve_place", _resolve)
+    card = _card(
+        status=EventCardStatus.PUBLISHED,
+        title="Настольные игры",
+        filled_count=0,
+        verification_status="approved",
+    )
+
+    session = _FakeSession()
+    with pytest.raises(CardEditRequiresReviewError) as error:
+        await update_card(
+            session,  # type: ignore[arg-type]
+            author_id=7,
+            card_uuid=uuid_lib.uuid4(),
+            payload=EventCardUpdate(place_uuid=uuid_lib.uuid4()),
+            settings=_Settings(),  # type: ignore[arg-type]
+            now=NOW,
+            repository=_FakeRepository(card=card),  # type: ignore[arg-type]
+        )
+
+    assert error.value.code == CARD_EDIT_REQUIRES_REVIEW_CODE
+    # **Замер фактического поведения (не желаемого).** В ORM-объекте `card.title`
+    # УЖЕ перетёрт новым значением: пересборка (`:739-743`) стоит выше
+    # автопроверки, иначе проверялся бы старый текст — а это и есть предмет N-1.
+    # В БД изменение НЕ попадает: роут на этом пути возвращает `409` БЕЗ
+    # `session.commit()`, а `get_session` не коммитит сам («коммит делает роут»,
+    # `app/core/db.py:45-50`). Поэтому проверяется ФАКТ отсутствия коммита, а не
+    # чистота объекта в памяти.
+    assert session.commits == 0, "сервис закоммитил отказ от автопроверки"

@@ -228,7 +228,8 @@ async def test_created_before_starts_invariant(session: AsyncSession) -> None:
             future = await client.post(
                 "/api/v1/cards",
                 json={
-                    "title": "Настольные игры",
+                    # AC-7 стори 13.2: `title` генерируется сервером, автором
+                    # не передаётся.
                     "category": "cafe",
                     # Стори 12.4 (AC-3): тип и активность обязательны.
                     "kind": "company",
@@ -242,7 +243,6 @@ async def test_created_before_starts_invariant(session: AsyncSession) -> None:
             past = await client.post(
                 "/api/v1/cards",
                 json={
-                    "title": "Прошлая встреча",
                     "category": "cafe",
                     # Стори 12.4 (AC-3): тип и активность обязательны.
                     "kind": "company",

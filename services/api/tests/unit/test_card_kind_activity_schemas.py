@@ -26,7 +26,6 @@ STARTS_AT = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 
 def _payload(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
-        "title": "Кофе в „Праге“",
         "category": "cafe",
         "place_uuid": PLACE_UUID,
         "starts_at": STARTS_AT,

@@ -196,7 +196,8 @@ async def test_patch_title_with_pending_still_succeeds(
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Новое название"},
+        # AC-7 стори 13.2: `title` из контракта удалён — правим описание.
+        json={"description": "Новое описание"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 

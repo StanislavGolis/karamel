@@ -377,7 +377,7 @@ async def test_uuid_is_generated_by_database(session: AsyncSession) -> None:
         ({"decision_window_minutes": 10081}, "ck_event_cards_decision_window"),
         ({"status": "unknown"}, "ck_event_cards_status"),
         ({"verification_status": "unknown"}, "ck_event_cards_verification_status"),
-        ({"category": "bar"}, "ck_event_cards_category"),
+        ({"category": "theatre"}, "ck_event_cards_category"),
         ({"city_slug": "Tomsk"}, "ck_event_cards_city_slug"),
         ({"city_slug": "to"}, "ck_event_cards_city_slug"),
         ({"status": "published"}, "ck_event_cards_published"),

@@ -121,7 +121,6 @@ async def _insert_card(
 
 def _payload(place_uuid: str, **overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
-        "title": "Кофе в „Праге“",
         "category": "cafe",
         "place_uuid": place_uuid,
         "starts_at": _future(days=2).isoformat(),

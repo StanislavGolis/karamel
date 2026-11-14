@@ -209,7 +209,7 @@ async def test_unknown_category_rejected_by_database(session: AsyncSession) -> N
     получил бы значение, для которого у клиента нет ветки отображения.
     """
     with pytest.raises(IntegrityError) as excinfo:
-        await _insert_place(session, category="bar")
+        await _insert_place(session, category="theatre")
 
     assert "ck_places_category" in str(excinfo.value)
 

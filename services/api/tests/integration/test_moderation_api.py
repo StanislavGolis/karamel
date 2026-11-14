@@ -45,7 +45,6 @@ def _starts_at(**delta: int) -> datetime:
 
 def _payload(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
-        "title": "Настольные игры",
         "category": "cafe",
         # Стори 12.4 (AC-3, FR117/FR118): оба поля обязательны в `EventCardCreate`.
         "kind": "company",
@@ -218,7 +217,7 @@ async def test_stop_word_card_stays_pending(client: AsyncClient, session: AsyncS
     """
     author, token = await _new_user(session)
     card_uuid = await _create_card(
-        client, token=token, session=session, title="Казино и займ вечером"
+        client, token=token, session=session, description="Казино и займ вечером"
     )
 
     row = await _card_row(session, card_uuid)
@@ -263,10 +262,10 @@ async def test_queue_lists_pending_with_author_and_place(
     moderator, moderator_token = await _new_user(session, role=UserRole.MODERATOR)
 
     pending_uuid = await _create_card(
-        client, token=author_token, session=session, title="Эскорт на вечер"
+        client, token=author_token, session=session, description="Эскорт на вечер"
     )
     approved_uuid = await _create_card(
-        client, token=author_token, session=session, title="Кино в пятницу"
+        client, token=author_token, session=session, description="Кино в пятницу"
     )
 
     response = await client.get(
@@ -305,8 +304,8 @@ async def test_queue_total_respects_status_filter(
     author, author_token = await _new_user(session)
     _, moderator_token = await _new_user(session, role=UserRole.MODERATOR)
     # Одна `pending` (стоп-слово) и одна `approved` (чистый текст).
-    await _create_card(client, token=author_token, session=session, title="Эскорт на вечер")
-    await _create_card(client, token=author_token, session=session, title="Кино в пятницу")
+    await _create_card(client, token=author_token, session=session, description="Эскорт на вечер")
+    await _create_card(client, token=author_token, session=session, description="Кино в пятницу")
 
     pending = await client.get(
         "/api/v1/moderation/cards?status=pending",
@@ -385,7 +384,12 @@ async def test_queue_pagination_is_stable(client: AsyncClient, session: AsyncSes
     created: list[str] = []
     for index in range(3):
         created.append(
-            await _create_card(client, token=author_token, session=session, title=f"Казино {index}")
+            await _create_card(
+                client,
+                token=author_token,
+                session=session,
+                description=f"Казино {index}",
+            )
         )
 
     # `limit` страницы задаётся константой сервиса (20), поэтому пагинация
@@ -433,7 +437,7 @@ async def test_approve_sets_moderator_from_session(
     author, author_token = await _new_user(session)
     moderator, moderator_token = await _new_user(session, role=UserRole.MODERATOR)
     card_uuid = await _create_card(
-        client, token=author_token, session=session, title="Эскорт на вечер"
+        client, token=author_token, session=session, description="Эскорт на вечер"
     )
 
     response = await client.post(
@@ -459,7 +463,7 @@ async def test_approve_twice_conflicts(client: AsyncClient, session: AsyncSessio
     author, author_token = await _new_user(session)
     _, moderator_token = await _new_user(session, role=UserRole.MODERATOR)
     card_uuid = await _create_card(
-        client, token=author_token, session=session, title="Эскорт на вечер"
+        client, token=author_token, session=session, description="Эскорт на вечер"
     )
     first = await client.post(
         f"/api/v1/moderation/cards/{card_uuid}/approve",
@@ -528,7 +532,7 @@ async def test_reject_stores_reason_and_author_sees_it(
     author, author_token = await _new_user(session)
     _, moderator_token = await _new_user(session, role=UserRole.MODERATOR)
     card_uuid = await _create_card(
-        client, token=author_token, session=session, title="Эскорт на вечер"
+        client, token=author_token, session=session, description="Эскорт на вечер"
     )
 
     response = await client.post(
@@ -564,7 +568,7 @@ async def test_reject_without_reason_rejected(
     author, author_token = await _new_user(session)
     _, moderator_token = await _new_user(session, role=UserRole.MODERATOR)
     card_uuid = await _create_card(
-        client, token=author_token, session=session, title="Эскорт на вечер"
+        client, token=author_token, session=session, description="Эскорт на вечер"
     )
 
     response = await client.post(
@@ -587,7 +591,7 @@ async def test_reject_twice_replaces_reason(client: AsyncClient, session: AsyncS
     author, author_token = await _new_user(session)
     _, moderator_token = await _new_user(session, role=UserRole.MODERATOR)
     card_uuid = await _create_card(
-        client, token=author_token, session=session, title="Эскорт на вечер"
+        client, token=author_token, session=session, description="Эскорт на вечер"
     )
     await client.post(
         f"/api/v1/moderation/cards/{card_uuid}/reject",
@@ -622,7 +626,7 @@ async def test_edit_rejected_card_runs_auto_check_again(
     author, author_token = await _new_user(session)
     _, moderator_token = await _new_user(session, role=UserRole.MODERATOR)
     card_uuid = await _create_card(
-        client, token=author_token, session=session, title="Эскорт на вечер"
+        client, token=author_token, session=session, description="Эскорт на вечер"
     )
     await client.post(
         f"/api/v1/moderation/cards/{card_uuid}/reject",
@@ -632,7 +636,10 @@ async def test_edit_rejected_card_runs_auto_check_again(
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Кино в пятницу"},
+        # AC-7 стори 13.2: `title` из контракта удалён — правим описание.
+        # Проверяется то же свойство: правка отозванной карточки перезапускает
+        # автопроверку и снимает `rejection_reason`.
+        json={"description": "Кино в пятницу"},
         cookies={ACCESS_COOKIE_NAME: author_token},
     )
 

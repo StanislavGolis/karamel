@@ -24,7 +24,6 @@ PLACE_UUID = uuid_lib.UUID("11111111-1111-4111-8111-111111111111")
 def _payload(**overrides: object) -> dict[str, object]:
     """Минимальный валидный вход: открытый набор на 3 места."""
     values: dict[str, object] = {
-        "title": "Настольные игры в „Праге“",
         "category": "cafe",
         "place_uuid": PLACE_UUID,
         "starts_at": "2026-11-01T19:00:00+07:00",
@@ -147,18 +146,26 @@ def test_server_side_field_is_forbidden() -> None:
         EventCardCreate(**_payload(status="published"))
 
 
-def test_title_is_normalized_before_length_check() -> None:
-    """AC-01: нормализация идёт ДО проверки длины.
+def test_author_title_is_rejected_before_length_check() -> None:
+    """AC-7 стори 13.2 (FR130, ADR-26): заголовок от автора отвергается.
 
-    Краснеет, если поменять `mode="before"` на `"after"`: заголовок из 100
-    значимых символов с NBSP по краям считался бы 102-символьным и получал
-    бы `422` на легальном вводе.
+    **Что было до 13.2.** Здесь проверялась нормализация `title` в `Create`
+    (`mode="before"` против `"after"`). С 13.2 поля в контракте нет: заголовок
+    собирает сервер из активности и места, и ЛЮБАЯ передача — включая
+    «нормальный на вид» заголовок из 100 символов — даёт `422`. Тест
+    переписан, а не удалён: свойство «автор не управляет заголовком» обязано
+    быть запертым (AC-7), и именно здесь проверяется, что отказ наступает
+    ДО проверки длины — то есть запрет не зависит от содержимого.
+
+    Краснеет, если снять валидатор `_reject_author_title`: тогда 100-символьный
+    заголовок прошёл бы как легальный ввод.
     """
     title = "и" * 100
 
-    card = EventCardCreate(**_payload(title=f"  {title}\u00a0 "))
+    with pytest.raises(ValidationError) as excinfo:
+        EventCardCreate(**_payload(title=f"  {title}\u00a0 "))
 
-    assert card.title == title
+    assert "title_not_accepted" in str(excinfo.value)
 
 
 def test_description_preserves_paragraph_breaks() -> None:
@@ -233,23 +240,29 @@ def test_event_card_update_none_means_do_not_touch() -> None:
 
     update = EventCardUpdate()
 
-    assert update.title is None
+    # AC-7 стори 13.2: поля `title` в `EventCardUpdate` больше нет — заголовок
+    # следует за активностью и местом, автор его не редактирует.
+    assert not hasattr(update, "title")
     assert update.capacity is None
     assert update.decision_window_minutes is None
 
 
-def test_event_card_update_normalizes_title() -> None:
-    """AC-05: заголовок нормализуется тем же кодом, что при создании.
+def test_event_card_update_rejects_title() -> None:
+    """AC-7 стори 13.2 (FR130, ADR-26): `PATCH title` отвергается `422`.
 
-    Краснеет, если убрать валидатор из `EventCardUpdate`: `'  Игры  '`
-    сохранилось бы с пробелами, и `PATCH` дал бы строку, которую `POST`
-    не пропускает.
+    **Что было до 13.2.** Здесь проверялась нормализация `title` в `Update`.
+    С 13.2 поле удалено из модели, а `model_config extra="forbid"` превращает
+    попытку правки в `422 extra_forbidden` — без нового доменного класса.
+
+    Краснеет, если вернуть поле в `EventCardUpdate`: тогда автор снова смог бы
+    переписать заголовок в обход генератора.
     """
     from app.schemas.event_card import EventCardUpdate
 
-    update = EventCardUpdate(title="  Игры  в  Праге  ")
+    with pytest.raises(ValidationError) as excinfo:
+        EventCardUpdate(title="  Игры  в  Праге  ")
 
-    assert update.title == "Игры в Праге"
+    assert "extra_forbidden" in str(excinfo.value)
 
 
 def test_event_card_update_keeps_paragraphs_in_description() -> None:

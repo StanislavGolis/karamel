@@ -206,6 +206,79 @@ class Settings(BaseSettings):
     # на валидной форме, а не ошибка конфигурации.
     city_timezone: str = "Asia/Tomsk"
 
+    # Стори 13.1 (AC-3, AC-10, O-4, O-5): адресный геокодер Nominatim.
+    #
+    # Значения живут в настройках, а не в сервисе: базовый URL — единственная
+    # точка, где адрес провайдера продублирован; тест подменяет транспорт, а
+    # не строку, поэтому значение обязано приходить сюда же (§18.6).
+    #
+    # `nominatim_user_agent` обязателен по правилам OSM: запрос без контакта
+    # блокируется на стороне провайдера, и отказ выглядел бы как «геокодер
+    # недоступен» без единой причины в логах. Контакт — домен сервиса (O-4).
+    nominatim_base_url: str = "https://nominatim.openstreetmap.org"
+    # O-4 в буквальной записи НЕИСПОЛНИМ (P-31, замер DS 2026-10-31):
+    # `User-Agent` — HTTP-заголовок, а заголовки кодируются ASCII/latin-1.
+    # httpx бросает `UnicodeEncodeError: 'ascii' codec can't encode characters`
+    # уже на присвоении значения, то есть КАЖДЫЙ поиск адреса отдал бы `500`.
+    # Домен тот же (`крмл.рф` = `xn--j1accp.xn--p1ai`), форма — исполнимая.
+    # Валидатор ниже роняет старт на не-ASCII, чтобы такая правка не дошла
+    # до первого живого запроса.
+    nominatim_user_agent: str = "karamel/0.1 (+https://xn--j1accp.xn--p1ai)"
+    # AC-3: таймаут 3 с. Три секунды, а не десять: форма создания карточки
+    # ждёт этот ответ, и при недоступном провайдере пользователь должен
+    # получить ручной ввод быстро (`ux-design-v2:913`).
+    nominatim_timeout_seconds: float = 3.0
+
+    # AC-3 (решение 1): глобальный лимит обращений к Nominatim — ОДИН запрос
+    # в секунду на процесс. Не на аккаунт: правило OSM ограничивает наш IP,
+    # а не пользователя, поэтому ключ лимита — константа, а не `user_id`.
+    #
+    # M-1 CR 2026-10-31: настройки `nominatim_rate_limit` БОЛЬШЕ НЕТ.
+    #
+    # Она существовала и не читалась ни разу: владелец правил `.env`, эффекта
+    # ноль. **Мёртвая настройка хуже отсутствующей** — она обещает управление,
+    # которого нет, и при разборе инцидента первым делом проверяют именно её.
+    #
+    # Частота не выражается числом и по существу: `SET NX PX` бинарный — либо
+    # ключ взят (запрос разрешён), либо нет. «2 req/s» этим примитивом не
+    # задаётся. Поэтому лимит живёт ЛИТЕРАЛОМ в одном месте —
+    # `address_geocoder._acquire_global_slot` — с комментарием о причине.
+    # Окно в миллисекундах остаётся: оно читается и имеет смысл.
+    nominatim_rate_window_ms: int = 1000
+
+    # AC-6: технический лимит эндпоинта по аккаунту. Значение выше, чем
+    # 1 req/s у провайдера: здесь защита от потока к НАШЕМУ прокси, и
+    # пользователь, набравший запрос, не должен упираться в него на каждом
+    # символе (debounce 400 мс на клиенте, AC-1 Task 6.2).
+    address_search_rate_limit: int = 10
+    address_search_rate_window_seconds: int = 60
+
+    # M-3 CR 2026-10-31: ОТДЕЛЬНЫЙ лимит на создание места. `POST /address/place`
+    # пишет в справочник города без модерации (`W-13.1-a`), то есть его квота
+    # защищает не трафик, а СОДЕРЖИМОЕ. Общая настройка с поиском означала бы,
+    # что изменение частоты поиска молча меняет скорость наполнения
+    # справочника — два разных риска на одном числе.
+    #
+    # Значение ниже поискового (10): поиск — обычное действие автора, а
+    # создание места — редкое (одно на карточку). ``
+    address_place_rate_limit: int = 5
+    address_place_rate_window_seconds: int = 60
+
+    # AC-10 (O-5): прямоугольник поиска по городам. Словарь, а не одна строка:
+    # при масштабировании на второй город одна рамка на приложение была бы
+    # той же ложью, что `community_slug` вместо `city_slug` (12.1).
+    #
+    # Формат значения — `<lng_min>,<lat_max>,<lng_max>,<lat_min>`, то есть
+    # ровно то, что принимает `viewbox` Nominatim (`x1,y1,x2,y2`: левый верхний
+    # угол, затем правый нижний). Порядок ОТЛИЧАЕТСЯ от `pilot_city_bbox`
+    # (там `lat_min,lat_max,lng_min,lng_max`): ось и порядок заданы форматом
+    # провайдера, и переиспользовать чужой порядок значило бы отправлять
+    # прямоугольник с перепутанными осями — поиск «в Атлантике» без ошибки.
+    # `NoDecode` обязателен по той же причине, что у `city_slugs`:
+    # pydantic-settings разбирает dict из окружения как JSON ещё до валидаторов,
+    # и `GEO_CITY_VIEWBOX=tomsk=84.80,...` роняло бы старт `SettingsError`.
+    geo_city_viewbox: Annotated[dict[str, str], NoDecode] = {"tomsk": "84.80,56.60,85.20,56.30"}
+
     # Стори 4.1, Task 5.1 (AC-03, OQ-1): окно решения по умолчанию для режима
     # «открытый набор» (вместимость 2–6). FR70 прямо говорит, что в этом
     # режиме окно у автора НЕ запрашивается — значит, значение обязано
@@ -405,7 +478,7 @@ class Settings(BaseSettings):
         """Task 6.2/6.4 (AC-01, D-11): нормализация домена cookie и fail-fast.
 
         Нормализация нужна потому, что в `.env` копируют адрес целиком
-        (`https://karamel.ru/`). Без неё `delete_cookie` и `set_cookie`
+        (`https://example.com/`). Без неё `delete_cookie` и `set_cookie`
         получили бы разные строки — это две разные cookie, и старая осталась бы
         в браузере после выхода.
 
@@ -427,7 +500,7 @@ class Settings(BaseSettings):
         if ":" in host or "@" in host or not host:
             raise ValueError(
                 "SESSION_COOKIE_DOMAIN должен быть доменом без схемы и порта, "
-                f"например `karamel.ru`; получено: {raw!r}"
+                f"например `example.com`; получено: {raw!r}"
             )
         host = host.lstrip(".")
         if not host or "." not in host and host != "localhost":
@@ -820,6 +893,123 @@ class Settings(BaseSettings):
                 f"{self.default_city_slug!r} отсутствует в {self.city_slugs!r}"
             )
         return self
+
+    @field_validator("geo_city_viewbox", mode="before")
+    @classmethod
+    def _parse_geo_city_viewbox(cls, v: object) -> object:
+        """AC-10 (O-5): `GEO_CITY_VIEWBOX` из `.env` → словарь `{city_slug: viewbox}`.
+
+        Формат строки — `tomsk=84.80,56.60,85.20,56.30;kemerovo=...`.
+        JSON в `.env` нечитаем для владельца (тот же довод, что у `city_slugs`),
+        поэтому разбор свой, а `NoDecode` не даёт pydantic-settings упасть
+        на не-JSON строке раньше валидатора.
+        """
+        if isinstance(v, str):
+            parsed: dict[str, str] = {}
+            for chunk in v.split(";"):
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+                if "=" not in chunk:
+                    raise ValueError(
+                        "GEO_CITY_VIEWBOX: ожидается `city_slug=lng_min,lat_max,lng_max,lat_min` "
+                        f"через `;`, получено {chunk!r}"
+                    )
+                slug, viewbox = chunk.split("=", 1)
+                parsed[slug.strip()] = viewbox.strip()
+            return parsed
+        return v
+
+    @staticmethod
+    def _parse_viewbox(slug: str, viewbox: str) -> tuple[float, float, float, float]:
+        """AC-10 (O-5): `<lng_min>,<lat_max>,<lng_max>,<lat_min>` → четыре числа.
+
+        Порядок задан форматом `viewbox` Nominatim (`x1,y1,x2,y2` — левый
+        верхний угол, затем правый нижний), а не порядком `pilot_city_bbox`.
+        Перевёрнутый прямоугольник не «пустой»: провайдер молча вернул бы
+        пустой список, и пользователь решил бы, что места нет в городе.
+        """
+        parts = [chunk.strip() for chunk in viewbox.split(",")]
+        if len(parts) != 4 or not all(parts):
+            raise ValueError(
+                f"GEO_CITY_VIEWBOX[{slug!r}]: ожидаются четыре числа через запятую: "
+                "lng_min,lat_max,lng_max,lat_min"
+            )
+        try:
+            lng_min, lat_max, lng_max, lat_min = (float(chunk) for chunk in parts)
+        except ValueError:
+            raise ValueError(
+                f"GEO_CITY_VIEWBOX[{slug!r}]: нечисловое значение {viewbox!r}"
+            ) from None
+        if not -90 <= lat_min < lat_max <= 90:
+            raise ValueError(
+                f"GEO_CITY_VIEWBOX[{slug!r}]: широты должны идти по возрастанию "
+                f"в -90..90, получено {lat_min}..{lat_max}"
+            )
+        if not -180 <= lng_min < lng_max <= 180:
+            raise ValueError(
+                f"GEO_CITY_VIEWBOX[{slug!r}]: долготы должны идти по возрастанию "
+                f"в -180..180, получено {lng_min}..{lng_max}"
+            )
+        return (lng_min, lat_max, lng_max, lat_min)
+
+    @model_validator(mode="after")
+    def _validate_geo_city_viewbox(self) -> "Settings":
+        """AC-10 (O-5): формат рамок и сверка ключей с `city_slugs` — fail-fast.
+
+        Проверка на старте, а не в момент запроса: слаг вне `city_slugs`
+        означает город, которого нет в пилоте, — поиск по нему вернул бы
+        чужие координаты, а `bounded=1` отрезал бы всё. Город без рамки
+        означает `503` на каждом поиске в нём. Опечатка в `.env` должна
+        ронять старт, а не превращать поиск в тихий отказ (§18.6).
+        """
+        for slug, viewbox in self.geo_city_viewbox.items():
+            self._parse_viewbox(slug, viewbox)
+        # Отсутствие рамки для города из `city_slugs` — НЕ ошибка старта.
+        #
+        # Первая редакция падала здесь, и это ломало рабочий стенд: в
+        # `CITY_SLUGS` пилота два города (`tomsk,kemerovo`), рамка была одна,
+        # и приложение отказывалось стартовать на верном `.env` — класс
+        # дефекта «зелёный на тестовом конфиге / красный на боевом».
+        # Рамка — уточнение поиска, а не его условие: без неё `address_geocoder`
+        # ищет по стране (`countrycodes=ru`) без `bounded`, и человек получает
+        # результаты вместо `503`.
+        #
+        # Неизвестный слаг в САМОЙ рамке по-прежнему остаётся: он не совпадёт
+        # ни с одним городом, и опечатка в `.env` иначе молчала бы.
+        unknown = [slug for slug in self.geo_city_viewbox if slug not in self.city_slugs]
+        if unknown:
+            raise ValueError(
+                "GEO_CITY_VIEWBOX: рамка для городов вне CITY_SLUGS "
+                f"{unknown!r} — поиск по ним невозможен"
+            )
+        return self
+
+    @field_validator("nominatim_user_agent")
+    @classmethod
+    def _validate_nominatim_user_agent(cls, v: str) -> str:
+        """AC-3 (P-31, замер DS 2026-10-31): UA обязан быть ASCII.
+
+        `User-Agent` — HTTP-заголовок, заголовки кодируются ASCII/latin-1, и
+        httpx бросает `UnicodeEncodeError` уже на присвоении значения. То есть
+        кириллица в этой настройке означает `500` на КАЖДОМ поиске адреса,
+        а не «странный заголовок в логах». Требование O-4 записано кириллицей
+        (`крмл.рф`), поэтому проверка стоит здесь: буквальная копия настройки
+        из решения должна падать на старте, а не на первом живом запросе.
+        """
+        if not v:
+            raise ValueError(
+                "NOMINATIM_USER_AGENT не может быть пустым: OSM блокирует запросы без контакта"
+            )
+        try:
+            v.encode("ascii")
+        except UnicodeEncodeError as error:
+            raise ValueError(
+                "NOMINATIM_USER_AGENT содержит не-ASCII символы: заголовок "
+                "кодируется ASCII, домен пишется в punycode "
+                f"(крмл.рф → xn--j1accp.xn--p1ai): {error}"
+            ) from None
+        return v
 
     @field_validator("pilot_city_bbox", mode="before")
     @classmethod

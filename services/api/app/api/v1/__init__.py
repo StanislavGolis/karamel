@@ -7,6 +7,7 @@
 
 from fastapi import APIRouter
 
+from app.api.v1.address import router as address_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.cards import router as cards_router
 from app.api.v1.chats import router as chats_router
@@ -27,6 +28,13 @@ from app.api.v1.support import router as support_router
 from app.api.v1.ws import router as ws_router
 
 api_router = APIRouter()
+# Стори 13.1 (AC-2, AC-4, AC-9): прокси адресного поиска и автосоздание места.
+# Отдельный роутер, а не ветка в `places.py`: у него другой потребитель
+# (автор карточки, не модератор), другой источник данных (внешний провайдер)
+# и другие границы доверия — `lat`/`lng` в ответе легальны ТОЛЬКО здесь.
+# `prefix="/address"` — намеренно не `geo_*`: `grep` по `geo` смешал бы этот
+# сервис с `geo_service.locate_city` (D-9, город по координатам устройства).
+api_router.include_router(address_router)
 api_router.include_router(auth_router)
 # Стори 1.4: `/auth/phone/request` и `/auth/phone/verify`. Отдельный роутер,
 # а не ветка в `auth.py`: другой провайдер и другой набор кодов ошибок.

@@ -109,21 +109,59 @@ def test_ddl_test_runs_without_xdist() -> None:
 
 
 def _uses_alembic_command(tree: ast.Module) -> bool:
-    """Есть ли в файле вызов `command.upgrade(...)` или `command.downgrade(...)`.
+    """Меняет ли файл схему: `command.upgrade/downgrade` ИЛИ сабпроцесс alembic.
 
     Читается AST, а не текст (H-3): строка `command.downgrade` в комментарии
     или в докстринге не делает файл DDL-тестом, и наоборот — обёртка над
     вызовом в хелпере обязана считаться.
+
+    **Вторая форма вызова (стори 13.2).** DDL-тесты гоняют alembic и
+    САБПРОЦЕССОМ: `subprocess.run([sys.executable, "-m", "alembic",
+    "downgrade", ...])`. Это не стилистическая прихоть: `alembic.command`
+    вызывает `asyncio.run()` внутри `env.py`, а тест уже работает в
+    запущенном event loop. До 13.2 гард такую форму не видел и объявлял
+    файл не-DDL. Замер перед правкой: **8 файлов** меняли схему сабпроцессом
+    без маркера — `unmarked` был пуст, и P-32 не исполнялся именно там, где
+    нужен.
+
+    Проверяются только мутирующие подкоманды (`upgrade`, `downgrade`);
+    `alembic check`, `heads`, `current` схему не меняют и маркера не требуют.
     """
+    calls_command_api = False
+    runs_alembic_subprocess = False
+    calls_upgrade_or_downgrade = False
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if not isinstance(func, ast.Attribute) or func.attr not in {"upgrade", "downgrade"}:
-            continue
-        if isinstance(func.value, ast.Name) and func.value.id == "command":
-            return True
-    return False
+        # Форма 1: `alembic.command.downgrade(config, "0039")`.
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr in {"upgrade", "downgrade"}
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "command"
+        ):
+            calls_command_api = True
+        first = node.args[0] if node.args else None
+        # Форма 2а: `subprocess.run([sys.executable, "-m", "alembic", ...])`.
+        if isinstance(first, (ast.List, ast.Tuple)):
+            constants = {
+                element.value
+                for element in first.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
+            if "alembic" in constants:
+                runs_alembic_subprocess = True
+        # Форма 2б: `_run_alembic("downgrade", "0039")` — литерал первым
+        # позиционным аргументом. Именно так устроены существующие
+        # migration-cycle тесты: сабпроцесс спрятан в локальном хелпере.
+        if isinstance(first, ast.Constant) and first.value in {"upgrade", "downgrade"}:
+            calls_upgrade_or_downgrade = True
+    # Форма 1 самодостаточна: `command.downgrade` уже называет мутирующую
+    # подкоманду. Для сабпроцесса нужны ОБЕ половины: файл, читающий голову
+    # (`alembic heads`) или сравнивающий модели (`alembic check`), схему не
+    # меняет и маркера не требует.
+    return calls_command_api or (runs_alembic_subprocess and calls_upgrade_or_downgrade)
 
 
 def _has_ddl_marker(tree: ast.Module) -> bool:

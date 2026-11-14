@@ -451,7 +451,7 @@ async def test_invalid_category_code_is_constant_and_carries_allowed_list() -> N
     session, settings = _session_with_settings()
 
     with pytest.raises(PlaceFieldError) as excinfo:
-        await create_place(session, settings=settings, **_kwargs(category="bar"))
+        await create_place(session, settings=settings, **_kwargs(category="theatre"))
 
     assert excinfo.value.code == PLACE_CATEGORY_INVALID_CODE == "category_invalid"
     assert excinfo.value.details == {"allowed": [str(item) for item in PlaceCategory]}
@@ -647,7 +647,7 @@ async def test_update_invalid_category_carries_allowed() -> None:
     place = _place()
 
     with pytest.raises(PlaceFieldError) as excinfo:
-        await update_place(session, place=place, changes={"category": "bar"}, settings=settings)
+        await update_place(session, place=place, changes={"category": "theatre"}, settings=settings)
 
     assert excinfo.value.code == PLACE_CATEGORY_INVALID_CODE
     assert excinfo.value.details == {"allowed": [str(item) for item in PlaceCategory]}

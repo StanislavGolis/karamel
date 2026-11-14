@@ -14,7 +14,11 @@ from app.models.enums import PlaceCategory
 # читался построчно и не выглядел перестановкой при добавлении значения.
 EXPECTED_CATEGORIES = (
     "cafe",
+    # Стори 13.2 (AC-1, ADR-12 amended): «бар» и «настольные игры» — значения
+    # справочника под плитки FR131. Порядок — как в `PlaceCategory`.
+    "bar",
     "cinema",
+    "boardgames",
     "quiz",
     "skating",
     "park",
@@ -57,5 +61,6 @@ def test_place_category_check_clause_built_from_enum() -> None:
     clause = _in_clause("category", tuple(PlaceCategory))
 
     assert clause == (
-        "category IN ('cafe', 'cinema', 'quiz', 'skating', 'park', 'sport', 'walk', 'other')"
+        "category IN ('cafe', 'bar', 'cinema', 'boardgames', 'quiz', 'skating', "
+        "'park', 'sport', 'walk', 'other')"
     )

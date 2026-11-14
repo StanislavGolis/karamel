@@ -48,6 +48,7 @@ from app.services.age_service import compute_age, today_or_now
 from app.services.card_content_rules import CardContent, evaluate_card_content
 from app.services.card_decision_service import DecisionOutcome, close_due_card
 from app.services.card_feed_cursor import decode_feed_cursor, encode_feed_cursor
+from app.services.card_title import generate_card_title
 from app.services.event_card_place import ensure_place_available
 from app.services.media_service import (
     MediaStorageError,
@@ -445,7 +446,12 @@ async def create_card(
     # AC-02, AC-03: место резолвится ПЕРВЫМ — до проверки времени.
     # Единственное обращение к `places`: даёт `place_id` для FK и бросает
     # `PlaceNotAvailableError` тем же билдером предиката, что гард 4.1.
-    place_id = await _resolve_place_id(session, place_uuid=payload.place_uuid, city_slug=city_slug)
+    #
+    # AC-3 стори 13.2: нужен не только `id`, но и `category` — предлог и падеж
+    # заголовка выбираются по КАТЕГОРИИ МЕСТА (ADR-26). Второго запроса нет:
+    # та же строка уже прочитана гардом доступности.
+    place = await _resolve_place(session, place_uuid=payload.place_uuid, city_slug=city_slug)
+    place_id = place.id
 
     # AC-03: сравнение строго с серверным моментом; `<=` тоже отказ —
     # «сейчас» уже не «будущее».
@@ -464,10 +470,23 @@ async def create_card(
     )
     expires_at = _compute_expires_at(starts_at=payload.starts_at, window_minutes=window, now=moment)
 
+    # AC-3 стори 13.2 (FR130, ADR-26): заголовок собирается сервером из
+    # активности и места. Схема уже отвергла присланный `title` (AC-7),
+    # поэтому `payload.title` для не-легаси активности всегда `None`.
+    #
+    # Собирается ДО `run_auto_check`: автопроверка читает `card.title`, и
+    # `None` дал бы `failed_rules=('length',)` на каждой карточке — то есть
+    # весь поток уходил бы в ручную модерацию (ADR-26, «три уровня защиты»).
+    generated_title = generate_card_title(
+        activity=payload.activity,
+        place_category=PlaceCategory(place.category),
+        place_name=place.name,
+    )
+
     card = EventCard(
         author_id=author_id,
         city_slug=city_slug,
-        title=payload.title,
+        title=generated_title,
         description=payload.description,
         category=str(payload.category),
         # AC-3 стори 12.4 (FR117, FR118): тип и активность приходят от автора
@@ -503,6 +522,31 @@ async def create_card(
     repo.add(card)
     await session.commit()
     return card
+
+
+async def _resolve_place(
+    session: AsyncSession, *, place_uuid: uuid_lib.UUID, city_slug: str
+) -> Any:
+    """Стори 13.2 (AC-3): доступное место ЦЕЛИКОМ — нужна `category`.
+
+    Не `Place` в аннотации: модуль `models.place` не импортируется в сервис
+    верхним уровнем (там уже есть `event_card_place`, который сам его тянет),
+    а импорт ради аннотации создал бы цикл `services` → `models` внутри
+    одного модуля с `event_card_place`. Возвращается ORM-объект, читаются
+    только `id` и `category` — тип проверяется тестом, а не аннотацией.
+
+    `PlaceNotAvailableError` — та же, что из `_resolve_place_id`: предикат
+    один (`build_availability_statement`), поэтому и ошибка одна.
+    """
+    from app.repositories.places import PlaceRepository
+    from app.services.event_card_place import PlaceNotAvailableError
+
+    place = await PlaceRepository(session).find_available_for_card(
+        place_uuid=place_uuid, city_slug=city_slug
+    )
+    if place is None:
+        raise PlaceNotAvailableError(place_uuid)
+    return place
 
 
 async def _resolve_place_id(
@@ -606,14 +650,20 @@ async def update_card(
     elif card.status != EventCardStatus.DRAFT:
         raise CardNotEditableError()
 
+    # AC-3 стори 13.2 (V-2): смена места ИЛИ активности обязана пересобрать
+    # заголовок, иначе он останется от прежнего места/активности. Место
+    # читается один раз и здесь же, поэтому переменная живёт до блока
+    # пересборки ниже.
+    changed_place: Any = None
     if payload.place_uuid is not None:
         # AC-02: место проверяется тем же гардом, что при создании.
         await ensure_place_available(
             session, place_uuid=payload.place_uuid, city_slug=card.city_slug
         )
-        card.place_id = await _resolve_place_id(
+        changed_place = await _resolve_place(
             session, place_uuid=payload.place_uuid, city_slug=card.city_slug
         )
+        card.place_id = changed_place.id
 
     if payload.starts_at is not None:
         # AC-03: проверка «не в прошлом» только для нового значения.
@@ -656,6 +706,41 @@ async def update_card(
         capacity=capacity, requested=requested_window, settings=settings
     )
 
+    # AC-3 стори 13.2 (V-2, FR130, ADR-26): заголовок следует за активностью и
+    # местом. Собирается ПОСЛЕ присвоения `activity` и `place_id` выше, но ДО
+    # автопроверки ниже — иначе проверялся бы прежний заголовок.
+    #
+    # AC-6: для легаси `other` заголовок НЕ пересобирается. Генератор на
+    # `Activity.OTHER` бросает `ValueError`, и вызывать его здесь значило бы
+    # делать нередактируемыми все старые карточки.
+    if changed_place is not None or payload.activity is not None:
+        # CR 13.2 H-1 (ВЫСОКИЙ, блокер): активность берётся из `payload`, если
+        # передана. Присвоение `card.activity` стоит НИЖЕ (после автопроверки),
+        # и чтение `Activity(card.activity)` видело СТАРОЕ значение: `PATCH`
+        # `{"activity": "cinema"}` при `coffee` оставлял заголовок «Кофе в кафе».
+        #
+        # Почему не перенести блок ниже присвоения: автопроверка (:735-753)
+        # читает `card.title` и обязана видеть НОВЫЙ заголовок — иначе
+        # опубликованная карточка проверялась бы по старому тексту.
+        effective_activity = (
+            payload.activity if payload.activity is not None else Activity(card.activity)
+        )
+        if effective_activity is not Activity.OTHER:
+            # Место для шаблона: только что выбранное либо текущее по `place_id`.
+            # Второй запрос нужен лишь при смене ОДНОЙ активности — при смене
+            # места строка уже прочитана гардом.
+            title_place = changed_place
+            if title_place is None:
+                from app.repositories.places import PlaceRepository
+
+                title_place = await PlaceRepository(session).get_by_id(card.place_id)
+            if title_place is not None:
+                card.title = generate_card_title(
+                    activity=effective_activity,
+                    place_category=PlaceCategory(title_place.category),
+                    place_name=title_place.name,
+                )
+
     # AC-02 (FR101, D-4.6-3): у ОПУБЛИКОВАННОЙ карточки новый текст проверяется
     # ДО присвоения. Неудача — отказ без единой мутации: карточка в ленте
     # остаётся прежней. Вернуть её в `pending` нельзя (непроверенный текст
@@ -665,7 +750,10 @@ async def update_card(
             payload.description if "description" in payload.model_fields_set else card.description
         )
         candidate = CardContent(
-            title=payload.title if payload.title is not None else card.title,
+            # AC-7 стори 13.2: `payload.title` не существует — поле удалено из
+            # `EventCardUpdate`. Проверяется текущий заголовок карточки, уже
+            # пересобранный выше, если менялись место или активность.
+            title=card.title,
             description=candidate_description,
             category=str(payload.category) if payload.category is not None else card.category,
         )
@@ -674,8 +762,9 @@ async def update_card(
 
     card.capacity = capacity
     card.decision_window_minutes = window
-    if payload.title is not None:
-        card.title = payload.title
+    # AC-7 стори 13.2 (FR130): присвоения `card.title` из `payload` здесь нет —
+    # автор заголовок не присылает. Заголовок пересобран выше, если менялись
+    # место или активность; в остальных случаях он не трогается.
     # AC-08 (X-19, стори 4.6): различие по ФАКТУ передачи поля, а не по значению.
     # `"description" in model_fields_set` — клиент прислал поле; пустая строка
     # после `normalize_bio` означает «стереть» → `None`. Отсутствие поля или

@@ -44,7 +44,6 @@ pytestmark = [
 def _card_body(place_uuid: str, starts_at: str) -> dict[str, object]:
     """Минимальное тело создания карточки — только обязательные поля."""
     return {
-        "title": "Встреча",
         "category": "cafe",
         "place_uuid": place_uuid,
         "starts_at": starts_at,

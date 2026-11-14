@@ -155,13 +155,15 @@ async def test_patch_published_without_joins_succeeds(
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Уточнил название"},
+        # AC-7 стори 13.2: `title` из контракта удалён, поэтому правка
+        # проверяется на `description` — единственном свободном тексте.
+        json={"description": "Уточнил описание"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 
     assert response.status_code == 200, response.text
     row = await _card_row(session, card_uuid)
-    assert row["title"] == "Уточнил название"
+    assert row["description"] == "Уточнил описание"
     assert row["status"] == "published"
 
 
@@ -180,7 +182,7 @@ async def test_patch_published_after_join_is_conflict(
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Поздно"},
+        json={"description": "Поздно"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 
@@ -206,7 +208,7 @@ async def test_patch_terminal_card_is_not_editable(
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Правка"},
+        json={"description": "Правка"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 
@@ -229,7 +231,10 @@ async def test_patch_published_with_stop_word_changes_nothing(
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Казино на районе"},
+        # AC-7 стори 13.2: стоп-слово проверяется через `description` —
+        # автопроверка читает склейку title+description, а title от автора
+        # больше не приходит.
+        json={"description": "Казино на районе"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 

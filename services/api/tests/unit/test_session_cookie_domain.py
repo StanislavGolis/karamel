@@ -41,10 +41,10 @@ def test_empty_domain_means_host_only() -> None:
 def test_domain_is_normalized() -> None:
     """Task 6.2: схема, слэш, регистр и ведущая точка срезаются."""
     assert _settings(session_cookie_domain="https://Karamel.RU/").session_cookie_domain == (
-        "karamel.ru"
+        "example.com"
     )
-    assert _settings(session_cookie_domain=".karamel.ru").session_cookie_domain == "karamel.ru"
-    assert _settings(session_cookie_domain="karamel.ru").session_cookie_domain == "karamel.ru"
+    assert _settings(session_cookie_domain=".example.com").session_cookie_domain == "example.com"
+    assert _settings(session_cookie_domain="example.com").session_cookie_domain == "example.com"
 
 
 def test_localhost_is_allowed() -> None:
@@ -67,9 +67,9 @@ def test_scheme_with_ip_is_normalized() -> None:
 @pytest.mark.parametrize(
     "value",
     [
-        "https://karamel.ru:3000",
-        "karamel.ru:3000",
-        "user:pass@karamel.ru",
+        "https://example.com:3000",
+        "example.com:3000",
+        "user:pass@example.com",
         "notadomain",
         "https://",
     ],
@@ -103,12 +103,12 @@ def test_clear_cookies_repeat_issue_attributes(monkeypatch: pytest.MonkeyPatch) 
     """
     from app.services import session_service
 
-    monkeypatch.setattr(session_service.settings, "session_cookie_domain", "karamel.ru")
+    monkeypatch.setattr(session_service.settings, "session_cookie_domain", "example.com")
     response = Response()
     clear_session_cookies(response)
 
     headers = response.headers.getlist("set-cookie")
     assert len(headers) == 2
-    assert all("domain=karamel.ru" in header.lower() for header in headers)
+    assert all("domain=example.com" in header.lower() for header in headers)
     # Max-Age=0 — признак удаления.
     assert all("max-age=0" in header.lower() for header in headers)

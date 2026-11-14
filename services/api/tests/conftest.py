@@ -53,7 +53,7 @@ from redis.exceptions import RedisError
 # Как обновлять. При появлении новой миграции-головы правится РОВНО эта строка;
 # `tests/unit/test_head_revision_constant.py` сверяет её с реальной головой и
 # падает при расхождении в обе стороны (константа отстала / угадана).
-HEAD_REVISION = "0039"
+HEAD_REVISION = "0040"
 
 #: Redis, в который ходят тесты. Тот же, что берёт приложение из настроек.
 REDIS_URL = os.environ.get("REDIS_URL")

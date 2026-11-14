@@ -70,7 +70,7 @@ describe("CardCreateForm: код `STARTS_AT_TOO_FAR` (AC-1)", () => {
     );
     render(<CardCreateForm places={PLACES} />);
 
-    await userEvent.type(screen.getByLabelText("Что"), "Прогулка");
+    // Стори 13.2 (AC-7): поля «Что» больше нет — заголовок генерирует сервер.
     // Дата внутри горизонта: клиентская подсказка не мешает отправке.
     await userEvent.type(screen.getByLabelText("Когда"), "2030-01-01T18:00");
     await userEvent.selectOptions(screen.getByLabelText("Где"), PLACES[0].uuid);

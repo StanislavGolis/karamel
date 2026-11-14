@@ -401,6 +401,21 @@ def _collect_forbidden_properties(
     return found
 
 
+# N-2 CR r2 2026-11-01: БЕЛЫЙ СПИСОК исключений гарда — константа, а не
+# условие внутри цикла.
+#
+# **Почему это отдельная константа.** Мутация M33 (CR r2) заменила
+# `path == "/api/v1/address/search"` на `path.startswith("/api/v1/address")`,
+# и ВСЕ тесты остались зелёными. То есть одной правкой можно было убрать
+# из-под гарда `POST /address/place` и любой будущий `/address/*` — включая
+# маршрут, который вернёт координаты без всякого основания.
+#
+# Константа + ассерт на её ТОЧНЫЙ состав превращает такую правку в красный
+# тест: второй путь нельзя добавить, не изменив константу и не уронив
+# `test_exempt_paths_are_exactly_one`.
+EXEMPT_PATHS: frozenset[str] = frozenset({"/api/v1/address/search"})
+
+
 def test_no_coordinate_fields_in_openapi_responses() -> None:
     """AC-03, D-10.3-3: в ОТВЕТАХ контракта нет полей координат.
 
@@ -430,10 +445,54 @@ def test_no_coordinate_fields_in_openapi_responses() -> None:
     )
     assert "LocateCityRequest" in schema["components"]["schemas"]
 
+    # Стори 13.1 (AC-5): второй и последний маршрут, где координаты в ОТВЕТЕ
+    # легальны — прокси адресного поиска. Nominatim отдаёт точку выбранного
+    # места, и клиент рисует по ней маркер на миникарте; без координаты выбор
+    # места на карте невозможен по определению.
+    #
+    # Исключение УЗКОЕ и проверяемое с двух сторон:
+    # 1. маршрут обязан быть в контракте — иначе исключение пережило бы
+    #    удаление/переименование маршрута и молча ослабило гард на будущее
+    #    (класс `W-12.5` H-2: гард смотрел не туда, куда обещал докстринг);
+    # 2. исключается РОВНО путь `/api/v1/address/search`; соседний
+    #    `POST /api/v1/address/place` остаётся под гардом — он пишет в `places`,
+    #    где координат нет и быть не может (`NFR34`).
+    assert "/api/v1/address/search" in paths, (
+        "эндпоинт транзита координат поиска адреса исчез из контракта — "
+        "пересмотри исключение (AC-5 стори 13.1)"
+    )
+    assert "/api/v1/address/place" in paths, (
+        "соседний маршрут автосоздания места исчез: исключение координат "
+        "должно оставаться узким и не покрывать его"
+    )
+    assert "AddressSuggestion" in schema["components"]["schemas"], (
+        "схема подсказки адреса исчезла из контракта — исключение стало пустым"
+    )
+
     violations: list[str] = []
     for path, operations in paths.items():
+        # AC-5: исключение — ТОЛЬКО `GET` этого пути, и только на ответ.
+        # Проверка `method` обязательна: `POST` по тому же адресу (если появится)
+        # вернул бы координаты уже без основания.
+        # N-2: сравнение по ТОЧНОМУ членству в белом списке, не по префиксу.
+        # `startswith` расширил бы исключение на весь `/address/*`.
+        response_path_exempt = path in EXEMPT_PATHS
         for method, operation in operations.items():
             if not isinstance(operation, dict):
+                continue
+            if response_path_exempt and method.lower() == "get":
+                # `parameters` всё равно проверяются: `?lat=` в query попал бы
+                # в логи доступа, то есть хранился бы. Исключение — про тело
+                # ответа, а не про запрос.
+                seen: set[str] = set()
+                violations.extend(
+                    _collect_forbidden_properties(
+                        operation.get("parameters", []),
+                        schema,
+                        f"{method.upper()} {path} parameters",
+                        seen,
+                    )
+                )
                 continue
             seen: set[str] = set()
             violations.extend(
@@ -666,3 +725,90 @@ def test_empty_versions_dir_raises_instead_of_green_p5(tmp_path: Path) -> None:
     """
     with pytest.raises(AssertionError, match="проверка слепа"):
         _scan_versions_dir(tmp_path)
+
+
+# --- N-2 CR r2 2026-11-01: белый список исключений заперт по СОСТАВУ ----------
+
+
+def test_exempt_paths_are_exactly_one() -> None:
+    """N-2 CR r2: в исключениях РОВНО ОДИН путь — `/api/v1/address/search`.
+
+    **Почему именно состав, а не факт сравнения.** Мутация M33 (CR r2)
+    заменила `path == "/api/v1/address/search"` на
+    `path.startswith("/api/v1/address")`, и ВСЕ тесты остались зелёными: одной
+    правкой из-под гарда ушёл бы `POST /address/place` и любой будущий
+    `/address/*`, включая маршрут с координатами. Сравнение с КОНСТАНТОЙ
+    превращает такую правку в красный тест: второй путь требует явного
+    изменения константы и падает здесь.
+    """
+    assert frozenset({"/api/v1/address/search"}) == EXEMPT_PATHS, (
+        f"белый список исключений изменился: {sorted(EXEMPT_PATHS)}. "
+        "Каждый новый путь — ОТДЕЛЬНОЕ решение о транзите координат; "
+        "добавлять его молча нельзя (D-6, NFR34)"
+    )
+    assert len(EXEMPT_PATHS) == 1, "ровно один маршрут, не раздел"
+
+
+def test_exempt_paths_are_exact_routes_not_prefixes() -> None:
+    """N-2: исключение — ТОЧНЫЙ маршрут, а не префикс раздела.
+
+    Краснеет, если в константу положат `/api/v1/address` или
+    `/api/v1/address/`: исключение расширится на весь раздел, и координаты
+    поедут из маршрутов, к которым это не относится (ответ на вопрос CR r1
+    «что мешает внести любой другой маршрут»).
+    """
+    for path in EXEMPT_PATHS:
+        assert not path.endswith("/"), f"исключение {path!r} — префикс раздела"
+        # Конкретный эндпоинт: `/api/v1/<раздел>/<действие>` — минимум 4 сегмента.
+        assert path.count("/") >= 4, (
+            f"исключение {path!r} слишком короткое: похоже на раздел, а не эндпоинт"
+        )
+
+
+def test_guard_catches_other_address_routes_with_coordinates() -> None:
+    """M33 CR r2: гард ЛОВИТ координаты на СОСЕДНЕМ маршруте `/address/*`.
+
+    **Почему одних ассертов на константу мало.** Мутация M33 меняет ТЕЛО
+    цикла: `path in EXEMPT_PATHS` → `path.startswith("/api/v1/address")`.
+    Константа при этом не меняется, а из-под гарда уходит весь раздел —
+    `POST /address/place` и любой будущий маршрут с координатами.
+
+    Поэтому проверяется ЭФФЕКТ (P-25), а не форма: во временный роутер
+    добавляется маршрут `/api/v1/address/probe`, который ВОЗВРАЩАЕТ `lat`/`lng`,
+    и гард обязан на нём покраснеть. Если исключение научилось покрывать
+    префикс — маршрут станет «своим», гард промолчит, тест краснеет.
+
+    Маршрут удаляется в `finally`: иначе он утёк бы в соседние тесты и в
+    `app.openapi()` навсегда.
+    """
+    from pydantic import BaseModel
+
+    class _ProbeResponse(BaseModel):
+        lat: float
+        lng: float
+
+    from app.api.v1.address import router as address_router
+    from app.main import app
+
+    @address_router.get("/probe", response_model=_ProbeResponse)
+    async def _probe() -> _ProbeResponse:  # pragma: no cover — только схема
+        return _ProbeResponse(lat=56.0, lng=84.0)
+
+    # `app.openapi()` кэшируется: без сброса схема осталась бы прежней.
+    cached = app.openapi_schema
+    app.openapi_schema = None
+    try:
+        with pytest.raises(AssertionError) as error:
+            test_no_coordinate_fields_in_openapi_responses()
+
+        message = str(error.value)
+        assert "/api/v1/address/probe" in message, (
+            f"гард не назвал нарушителя: {message[:300]}"
+        )
+    finally:
+        app.openapi_schema = cached
+        # Убираем пробный маршрут из роутера: список `routes` у FastAPI —
+        # обычный list, и достаточно снять последний элемент.
+        address_router.routes.pop()
+        app.openapi_schema = None
+        app.openapi()

@@ -23,6 +23,8 @@ import { z } from "zod";
 // Стори 12.6 (AC-2, Task 7.2): правило пары границ — из общего модуля,
 // чтобы форма и лента не разошлись (CR 12.6 H-6).
 import { ageRangeFields, withAgeRange } from "@/lib/audience-bounds";
+// Стори 13.1 (AC-1, AC-2, AC-4): выбор места с картой OSM через наш прокси.
+import { PlacePicker } from "@/components/cards/place-picker";
 
 /** Состояния экрана по UX `2а`. `rejected` — 4.3, `limit-reached` — 4.4. */
 type FormState =
@@ -124,7 +126,10 @@ const ERRORS: Record<string, { message: string; field?: FieldName }> = {
  */
 const formSchema = withAgeRange(
   z.object({
-  title: z.string().trim().min(1, "Название не может быть пустым").max(100, "Слишком длинное"),
+  // Стори 13.2 (AC-7, FR130, ADR-26): поля `title` здесь НЕТ — заголовок
+  // собирает сервер из активности и места. Сервер отвергает присланный
+  // `title` (`422 title_not_accepted`), поэтому форма обязана его не
+  // отправлять: иначе создание карточки перестало бы работать вовсе.
   starts_at: z.string().min(1, "Укажите дату и время"),
   place_uuid: z.string().min(1, "Выберите место из справочника"),
   capacity: z.number().int().min(1).max(6),
@@ -163,7 +168,7 @@ export function CardCreateForm({ places }: Props) {
   // Значения держим отдельно от состояния экрана: при ошибке сети ввод
   // не теряется (UX `2а`, требование AC-09).
   const [values, setValues] = useState<FormValues>({
-    title: "",
+    // Стори 13.2 (AC-7): `title` не вводится — сервер собирает его сам.
     starts_at: "",
     place_uuid: "",
     capacity: 2,
@@ -179,6 +184,17 @@ export function CardCreateForm({ places }: Props) {
     age_max: undefined,
   });
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
+  /**
+   * Стори 13.1 (AC-9): категория выбранного места.
+   *
+   * **Почему отдельное состояние, а не поиск по `places`.** Место, созданное
+   * из подсказки OSM, в массиве `places` ОТСУТСТВУЕТ: страница загрузила
+   * справочник до того, как место появилось. `places.find(...)` вернул бы
+   * `undefined`, и карточка ушла бы с `category: "other"` — то есть в ленте
+   * вместо кинопросмотра оказалось бы «другое». `PlacePicker` отдаёт
+   * категорию вместе с UUID, и она переживает отсутствие в справочнике.
+   */
+  const [chosenCategory, setChosenCategory] = useState<string | undefined>(undefined);
   /**
    * `max` для `datetime-local` — подсказка браузеру, не правило (AC-1).
    *
@@ -244,6 +260,11 @@ export function CardCreateForm({ places }: Props) {
     try {
       // CR 4.2, патч 1: `category` берётся из выбранного места — иначе
       // запрос отвергался бы `422` (поле обязательно в `EventCardCreate`).
+      //
+      // Стори 13.1 (AC-9): порядок источников — сначала `chosenCategory`
+      // (его ставит `PlacePicker`, и он верен даже для места, созданного из
+      // подсказки OSM), затем справочник. Обратный порядок терял бы
+      // категорию нового места: в массиве `places` его ещё нет.
       const selectedPlace = places.find((place) => place.uuid === parsed.data.place_uuid);
       response = await fetch("/api/proxy/cards", {
         method: "POST",
@@ -252,7 +273,7 @@ export function CardCreateForm({ places }: Props) {
         // время без зоны, а сервер требует зону (ADR-16) и отклонит наивное.
         body: JSON.stringify({
           ...parsed.data,
-          category: selectedPlace?.category ?? "other",
+          category: chosenCategory ?? selectedPlace?.category ?? "other",
           starts_at: new Date(parsed.data.starts_at).toISOString(),
         }),
         credentials: "same-origin",
@@ -307,16 +328,10 @@ export function CardCreateForm({ places }: Props) {
         </p>
       ) : null}
 
-      <Field label="Что" error={errors.title}>
-        <input
-          value={values.title}
-          onChange={(event) => update("title", event.target.value)}
-          maxLength={100}
-          className="w-full rounded-md border border-[color:var(--border-input)] px-3 py-2"
-          placeholder="Настольные игры в „Праге“"
-        />
-      </Field>
-
+      {/* Стори 13.2 (AC-7, FR130): поля «Что» больше нет. Заголовок собирает
+          сервер из выбранной активности и места («Настольные игры в баре
+          „Прага“»), поэтому автор не должен ни придумывать его, ни
+          редактировать. Плитки активности — стори 13.6. */}
       <Field label="Когда" error={errors.starts_at}>
         <input
           type="datetime-local"
@@ -331,21 +346,35 @@ export function CardCreateForm({ places }: Props) {
         />
       </Field>
 
-      <Field label="Где" error={errors.place_uuid}>
-        {/* FR98, NFR34: только справочник — свободного ввода адреса нет. */}
-        <select
+      <div className="flex flex-col gap-2 text-base">
+        {/* Стори 13.1 (AC-1, AC-2, AC-4, AC-9): выбор места — справочник
+            города плюс поиск по карте OSM через наш прокси. Свободный ввод
+            адреса здесь не «открытая форма»: он создаёт место в справочнике
+            через `POST /api/v1/address/place`, дедуп — `uq_places_city_name`.
+            `places` по-прежнему виден всегда, поэтому отказ карты (503) не
+            блокирует создание карточки (AC-4). */}
+        <PlacePicker
+          places={places}
           value={values.place_uuid}
-          onChange={(event) => update("place_uuid", event.target.value)}
-          className="w-full rounded-md border border-[color:var(--border-input)] px-3 py-2"
-        >
-          <option value="">Выберите место</option>
-          {places.map((place) => (
-            <option key={place.uuid} value={place.uuid}>
-              {place.name} — {place.address_text}
-            </option>
-          ))}
-        </select>
-      </Field>
+          // H-3 CR 2026-10-31: ошибка `place_uuid` ОБЯЗАНА доходить до поля.
+          // `formSchema` требует место, `submit` пишет «Выберите место из
+          // справочника» в `errors.place_uuid`. Пока здесь стоял `undefined`,
+          // сообщение уходило в никуда: кнопка нажималась, форма молча не
+          // отправлялась, и пользователь не понимал, чего не хватает.
+          // Тот же путь у серверного `PLACE_NOT_AVAILABLE`
+          // (`ERRORS[...].field = "place_uuid"`).
+          error={errors.place_uuid}
+          onChange={(place) => {
+            // AC-5: уходит только UUID места. Координаты живут в состоянии
+            // `PlacePicker` и в `places` не попадают.
+            update("place_uuid", place?.uuid ?? "");
+            // FR69: категория карточки берётся из места. Для места, созданного
+            // по подсказке OSM, категорию принёс `category_hint` (вне enum →
+            // `other` уже на сервере).
+            setChosenCategory(place?.category ?? "other");
+          }}
+        />
+      </div>
 
       <Field label="Сколько человек" error={errors.capacity}>
         {/* FR70: выбор «1» включает режим заявок, 2–6 — открытый набор. */}

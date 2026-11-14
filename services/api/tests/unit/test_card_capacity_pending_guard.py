@@ -92,6 +92,7 @@ def _card(**overrides: Any) -> EventCard:
         "author_id": 7,
         "place_id": 42,
         "city_slug": "tomsk",
+        # Стори 13.2 (AC-7): title — NOT NULL в БД, в фабрике модели задаётся явно.
         "title": "Настольные игры",
         "category": "cafe",
         "starts_at": STARTS_AT,
@@ -188,11 +189,11 @@ def test_patch_title_keeps_working_with_live_pending_request(
     updated = _run_update(
         monkeypatch,
         card=card,
-        payload=EventCardUpdate(title="Новое название"),
+        payload=EventCardUpdate(description="Новое название"),
         has_pending=True,
     )
 
-    assert updated.title == "Новое название"
+    assert updated.description == "Новое название"
     assert updated.capacity == 1
 
 

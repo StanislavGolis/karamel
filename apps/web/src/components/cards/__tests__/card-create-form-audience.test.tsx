@@ -41,11 +41,25 @@ afterEach(() => {
  * Рамки — единственное, что различается между тестами ниже.
  */
 async function fillRequired() {
-  await userEvent.type(screen.getByLabelText("Что"), "Кино в субботу");
+  // Стори 13.2 (AC-7, FR130): поля «Что» больше нет — заголовок собирает
+  // сервер из активности и места. Заполняются только существующие поля.
   await userEvent.type(screen.getByLabelText("Когда"), "2030-01-01T18:00");
   await userEvent.selectOptions(screen.getByLabelText("Где"), PLACES[0].uuid);
   await userEvent.click(screen.getByRole("button", { name: "Компания" }));
   await userEvent.selectOptions(screen.getByLabelText("Чем займётесь"), "cinema");
+}
+
+/**
+ * Вызовы `fetch`, которые относятся к СОЗДАНИЮ карточки.
+ *
+ * С H-1 (`PlacePicker` грузит центр карты) форма на монтировании шлёт
+ * `/api/proxy/address/city`. Прежние ассерты `toHaveBeenCalledTimes(1)` и
+ * `mock.calls[0]` считали ВСЕ запросы и краснели на верном коде: нулевым
+ * вызовом шёл бы город, а не карточка. Фильтр по адресу делает тест
+ * устойчивым к любым новым фоновым запросам формы.
+ */
+function cardCalls(fetchMock: ReturnType<typeof vi.fn>): unknown[][] {
+  return fetchMock.mock.calls.filter((call) => String(call[0]).includes("/api/proxy/cards"));
 }
 
 describe("CardCreateForm — рамки аудитории (AC-2, Task 7.1–7.2)", () => {
@@ -67,13 +81,25 @@ describe("CardCreateForm — рамки аудитории (AC-2, Task 7.1–7.2
 
     await userEvent.click(screen.getByRole("button", { name: /Опубликовать/ }));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cardCalls(fetchMock)).toHaveLength(1);
     const body = JSON.parse(
-      (fetchMock.mock.calls[0]?.[1] as { body: string }).body,
+      (cardCalls(fetchMock)[0]?.[1] as { body: string }).body,
     ) as Record<string, unknown>;
     expect(body.gender_filter).toBe("female");
     expect(body.age_min).toBe(25);
     expect(body.age_max).toBe(35);
+    // Стори 13.2 (AC-7, CR 13.2 H-5, Task 3b.3): в теле НЕТ ключа `title`.
+    //
+    // **Почему явный ассерт, а не косвенный.** До CR возврат поля в форму
+    // ловился падением рендера (таймаут поиска элемента «Что»), и сообщение
+    // говорило о таймауте, а не о том, что на сервер ушёл `title`. Явная
+    // проверка тела даёт точную диагностику ПРИЧИНЫ: сервер отвергает
+    // присланный заголовок `422 title_not_accepted` (AC-7), значит форма
+    // обязана его не отправлять.
+    //
+    // Краснеет, если вернуть `title` в zod-схему и `values`: ключ появится
+    // в теле, и создание карточки в продукте сломается.
+    expect(body).not.toHaveProperty("title");
   });
 
   it("рамки очищены — в payload их НЕТ (снятая рамка не возвращается)", async () => {
@@ -92,9 +118,9 @@ describe("CardCreateForm — рамки аудитории (AC-2, Task 7.1–7.2
 
     await userEvent.click(screen.getByRole("button", { name: /Опубликовать/ }));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cardCalls(fetchMock)).toHaveLength(1);
     const body = JSON.parse(
-      (fetchMock.mock.calls[0]?.[1] as { body: string }).body,
+      (cardCalls(fetchMock)[0]?.[1] as { body: string }).body,
     ) as Record<string, unknown>;
     // `undefined` в `JSON.stringify` не попадает в объект вовсе — поэтому
     // проверяется отсутствие ключа, а не его значение: `null` сервер понял бы
@@ -117,7 +143,9 @@ describe("CardCreateForm — рамки аудитории (AC-2, Task 7.1–7.2
     // Текст — человеческий, не техническое `age_range_invalid` (UX §1052).
     expect(await screen.findByText("Нижняя граница больше верхней")).toBeInTheDocument();
     // Человек видит ошибку на своих же цифрах — гонять его за `422` незачем.
-    expect(fetchMock).not.toHaveBeenCalled();
+    // С H-1 форма грузит центр карты на монтировании: проверяем, что не ушёл
+    // именно ЗАПРОС КАРТОЧКИ (валидация отбила его до сети).
+    expect(cardCalls(fetchMock)).toEqual([]);
   });
 
   it("прямая пара проходит — пара к предыдущему (иначе `<=` не отличить от запрета)", async () => {
@@ -136,7 +164,7 @@ describe("CardCreateForm — рамки аудитории (AC-2, Task 7.1–7.2
     await userEvent.click(screen.getByRole("button", { name: /Опубликовать/ }));
 
     expect(screen.queryByText("Нижняя граница больше верхней")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cardCalls(fetchMock)).toHaveLength(1);
   });
 
   it("полуоткрытая пара «от 30» валидна (AC-1a): вторая граница не обязательна", async () => {
@@ -154,6 +182,6 @@ describe("CardCreateForm — рамки аудитории (AC-2, Task 7.1–7.2
     await userEvent.click(screen.getByRole("button", { name: /Опубликовать/ }));
 
     expect(screen.queryByText("Нижняя граница больше верхней")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cardCalls(fetchMock)).toHaveLength(1);
   });
 });

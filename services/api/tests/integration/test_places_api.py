@@ -505,7 +505,7 @@ async def test_category_invalid_carries_allowed_list(
 
     response = await client.post(
         "/api/v1/places",
-        json=_payload(category="bar"),
+        json=_payload(category="theatre"),
         cookies={ACCESS_COOKIE_NAME: token},
     )
 

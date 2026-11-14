@@ -54,7 +54,7 @@ def test_unknown_category_message_lists_all_categories() -> None:
     перечня, и клиент 3.2 не сможет показать админу список из выпадашки.
     """
     with pytest.raises(ValidationError) as excinfo:
-        PlaceCreate(**_payload(category="bar"))
+        PlaceCreate(**_payload(category="theatre"))
 
     message = str(excinfo.value)
     for category in PlaceCategory:

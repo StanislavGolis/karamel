@@ -180,7 +180,6 @@ async def _create_draft(client: AsyncClient, token: str, place_id: int, **overri
     """Черновик через API: публикация проверяется на состоянии, которое создал `POST`."""
     place_uuid = await _place_uuid(client, token, place_id)
     payload: dict[str, Any] = {
-        "title": "Настольные игры",
         "category": "cafe",
         "place_uuid": place_uuid,
         # Стори 12.4 (AC-3): тип и активность обязательны в `EventCardCreate`.

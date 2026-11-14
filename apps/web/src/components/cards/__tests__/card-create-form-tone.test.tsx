@@ -33,14 +33,17 @@ afterEach(() => {
 });
 
 describe("CardCreateForm: тон ошибки по источнику", () => {
-  it("AC-3: пустое название (валидация клиента) — warning, не danger", async () => {
+  it("AC-3: пустое место (валидация клиента) — warning, не danger", async () => {
     vi.stubGlobal("fetch", vi.fn());
     render(<CardCreateForm places={PLACES} />);
 
-    // Отправка заведомо невалидной формы: название пустое. До сети дело не дойдёт.
+    // **Почему не «пустое название».** Стори 13.2 (AC-7, FR130) удалила поле
+    // «Что»: заголовок собирает сервер, автор его не вводит. Требование AC-3
+    // (клиентская ошибка — `warning`) осталось, поэтому берётся следующая
+    // клиентская проверка формы — незаполненное место.
     await userEvent.click(screen.getByRole("button", { name: /Опубликовать/ }));
 
-    const message = await screen.findByText("Название не может быть пустым");
+    const message = await screen.findByText("Выберите место из справочника");
     // Краснеет, если tone снова станет `danger`: пользователь видит тревогу
     // на собственной опечатке, а `danger` зарезервирован под необратимое.
     expect(message.className).toContain("text-warning");
@@ -59,9 +62,9 @@ describe("CardCreateForm: тон ошибки по источнику", () => {
     );
     render(<CardCreateForm places={PLACES} />);
 
-    // Метки полей — «Что», «Когда», «Где» (§6.3, форма 4.2). Валидные значения
-    // нужны, чтобы клиентская схема пропустила форму и запрос дошёл до сети.
-    await userEvent.type(screen.getByLabelText("Что"), "Прогулка");
+    // Стори 13.2 (AC-7): поля «Что» больше нет — заголовок генерирует сервер.
+    // Остальные поля валидны, чтобы клиентская схема пропустила форму и
+    // запрос дошёл до сети.
     await userEvent.type(screen.getByLabelText("Когда"), "2030-01-01T18:00");
     await userEvent.selectOptions(screen.getByLabelText("Где"), PLACES[0].uuid);
     // Стори 12.4 (AC-3): тип встречи и занятие обязательны. Без них форма

@@ -56,7 +56,6 @@ def _starts_at(**delta: int) -> datetime:
 
 def _payload(**overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
-        "title": "Настольные игры",
         "category": "cafe",
         # Стори 12.4 (AC-3, FR117/FR118): оба поля обязательны в `EventCardCreate`.
         "kind": "company",
@@ -124,8 +123,10 @@ async def _card_row(session: AsyncSession, card_uuid: str) -> dict[str, Any] | N
             "SELECT author_id, city_slug, status, verification_status, "
             "filled_count, starts_at, expires_at, decision_window_minutes, "
             # Стори 4.6 (AC-02): правка опубликованной проверяется по сохранённому
-            # заголовку — без него нельзя отличить «поле записано» от «ответ 200».
-            "published_at, title FROM event_cards WHERE uuid = :uuid"
+            # полю — без него нельзя отличить «поле записано» от «ответ 200».
+            # Стори 13.2 (AC-7): `title` больше не приходит от автора, поэтому
+            # проверяется `description` — единственное свободное текстовое поле.
+            "published_at, title, description FROM event_cards WHERE uuid = :uuid"
         ),
         {"uuid": card_uuid},
     )
@@ -356,7 +357,8 @@ async def test_update_own_draft_changes_fields_and_expires(
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Новое название", "starts_at": new_starts},
+        # AC-7 стори 13.2: `title` из контракта удалён — правим описание.
+        json={"description": "Новое описание", "starts_at": new_starts},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 
@@ -381,7 +383,7 @@ async def test_update_foreign_card_is_not_found(client: AsyncClient, session: As
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Взлом"},
+        json={"description": "Взлом"},
         cookies={ACCESS_COOKIE_NAME: stranger_token},
     )
 
@@ -403,7 +405,7 @@ async def test_update_missing_card_returns_same_code(
 
     response = await client.patch(
         f"/api/v1/cards/{uuid_lib.uuid4()}",
-        json={"title": "Что-то"},
+        json={"description": "Что-то"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 
@@ -429,14 +431,14 @@ async def test_update_published_card_conflicts(client: AsyncClient, session: Asy
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "После публикации"},
+        json={"description": "После публикации"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 
     assert response.status_code == 200, response.text
     row = await _card_row(session, card_uuid)
     assert row is not None
-    assert row["title"] == "После публикации"
+    assert row["description"] == "После публикации"
     # AC-02 (4.6): уже проверенная карточка остаётся `approved` и НЕ уходит
     # в `pending` — иначе она исчезла бы из ленты на время новой модерации.
     assert row["verification_status"] == "approved"
@@ -506,7 +508,9 @@ async def test_publish_pending_card_is_rejected(client: AsyncClient, session: As
     попал бы в ленту, хотя NFR51 обещает автору проверку.
     """
     _, token = await _new_user(session)
-    card_uuid = await _create_card(client, session, token, title="Казино и займ")
+    # AC-7 стори 13.2: `title` автором не передаётся — стоп-слово задаётся
+    # описанием (автопроверка читает склейку title+description).
+    card_uuid = await _create_card(client, session, token, description="Казино и займ")
 
     response = await client.post(
         f"/api/v1/cards/{card_uuid}/publish", cookies={ACCESS_COOKIE_NAME: token}
@@ -666,3 +670,64 @@ async def test_get_foreign_city_card_is_404_over_http(
     # ADR-13: именно `404` — `403` раскрыл бы существование карточки.
     assert foreign.status_code == 404, foreign.text
     assert foreign.json()["code"] == "card_not_found"
+
+
+# --- Стори 13.2 (CR H-4): AC-5 через ЖИВОЙ API --------------------------------
+#
+# **Зачем отдельный тест.** AC-5 («заголовок сгенерирован ⇒ `approved`»)
+# проверялся только на уровне `evaluate_card_content` — чистым вызовом правила.
+# Если `run_auto_check` перестанет вызываться в `create_card` или `title`
+# попадёт в него `None`, unit-тесты останутся зелёными, а продукт начнёт
+# отправлять каждую карточку в ручную модерацию. Здесь проверяется тот путь,
+# которым идёт настоящий автор: `POST` → `GET`.
+
+
+async def test_generated_title_is_not_empty_and_approved_over_api(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """AC-3, AC-5 (CR H-4): `POST /cards` → `GET /cards/{uuid}` → `approved`.
+
+    Проверяется ТРИ вещи одним сценарием:
+    1. `title` непуст — сервер собрал его сам (AC-3, AC-7: автор не присылает);
+    2. `title` содержит фразу активности — иначе «непусто» прошло бы и на
+       константе-заглушке;
+    3. `verification_status == 'approved'` — автопроверка состоялась и
+       не нашла нарушений (AC-5).
+
+    Краснеет, если `run_auto_check` убрать из `create_card` (статус остался бы
+    `pending`) или если `title` попадёт в проверку `None` (правило `length`).
+    """
+    # `GET /cards/{uuid}` стоит на `ConsentUser`: без согласия — `403`, и тест
+    # упал бы не по предмету AC-5. Согласие ставится явно — тот же приём, что
+    # в `test_get_foreign_city_card_is_404_over_http` и `test_cards_feed_api.py`.
+    author, token = await _new_user(session)
+    author.age_confirmed = True
+    author.consent_given_at = datetime.now(UTC)
+    await session.flush()
+    place_uuid = await _insert_place(session)
+
+    response = await client.post(
+        "/api/v1/cards",
+        # Активность задаётся явно: дефолт `_payload` — `boardgames`, и заголовок
+        # с ним проверял бы другую фразу. `coffee` + место категории `cafe`
+        # дают предсказуемое «Кофе в кафе „…“».
+        json=_payload(place_uuid=place_uuid, activity="coffee"),
+        cookies={ACCESS_COOKIE_NAME: token},
+    )
+    assert response.status_code == 201, response.text
+    card_uuid = str(response.json()["uuid"])
+
+    read = await client.get(f"/api/v1/cards/{card_uuid}", cookies={ACCESS_COOKIE_NAME: token})
+    assert read.status_code == 200, read.text
+    body = read.json()
+
+    assert body["title"], "заголовок пуст — генерация не состоялась"
+    assert body["title"].startswith("Кофе в кафе"), (
+        f"заголовок собран не по активности и категории места: {body['title']!r}"
+    )
+    assert "…" not in body["title"], (
+        f"имя места короткое, усечения быть не должно: {body['title']!r}"
+    )
+    assert body["verification_status"] == "approved", (
+        f"автопроверка не пропустила сгенерированный заголовок: {body}"
+    )

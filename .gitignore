@@ -40,3 +40,6 @@ npm-debug.log*
 # os / editor
 .DS_Store
 .idea/
+
+# Внутренние runbook'и (деплой, бэкапы, аптайм) — не для публикации
+docs/

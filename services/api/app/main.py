@@ -25,6 +25,7 @@ from app.core.no_store import NoStoreMiddleware
 from app.core.redis import dispose_redis
 from app.core.today import TodayMiddleware
 from app.models.enums import PlaceCategory
+from app.services.address_geocoder import dispose_http_client as dispose_geocoder_client
 from app.services.oauth import dispose_http_client
 from app.services.place_service import (
     PLACE_CITY_IMMUTABLE_CODE,
@@ -49,6 +50,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
     await ws_shutdown()
     await dispose_http_client()
+    # Стори 13.1 (CR L-1 / `W-13.1-k`): клиент геокодера — второй пул
+    # соединений к чужому хосту. Без закрытия сокеты живут до сборки мусора,
+    # и остановка приложения (а в тестах — выход из `lifespan`) висит на
+    # `ep_poll`, ожидая, пока их отпустит ОС.
+    await dispose_geocoder_client()
     await dispose_redis()
     await dispose_engine()
 

@@ -89,7 +89,6 @@ async def _insert_place(session: AsyncSession) -> str:
 
 def _payload(place_uuid: str, *, starts_at: datetime, **overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
-        "title": "Настольные игры",
         "category": "cafe",
         "kind": "company",
         "activity": "boardgames",
@@ -208,7 +207,8 @@ async def test_patch_without_starts_at_still_works(
 
     response = await client.patch(
         f"/api/v1/cards/{card_uuid}",
-        json={"title": "Новое название"},
+        # AC-7 стори 13.2: `title` из контракта удалён — правим описание.
+        json={"description": "Новое описание"},
         cookies={ACCESS_COOKIE_NAME: token},
     )
 

@@ -186,6 +186,8 @@ def _card(**overrides: Any) -> EventCard:
         "author_id": 7,
         "place_id": 42,
         "city_slug": "tomsk",
+        # Стори 13.2 (AC-7, ADR-26): title в БД NOT NULL, но приходит не от
+        # клиента, а от генератора. В фабрике модели он нужен явно.
         "title": "Настольные игры",
         "description": None,
         "category": "cafe",
@@ -351,13 +353,13 @@ async def test_update_published_without_joins_is_allowed(status: EventCardStatus
         _FakeSession(),  # type: ignore[arg-type]
         author_id=7,
         card_uuid=CARD_UUID,
-        payload=EventCardUpdate(title="Новое название"),
+        payload=EventCardUpdate(description="Новое название"),
         settings=_Settings(),  # type: ignore[arg-type]
         now=NOW,
         repository=_StateRepository(card),  # type: ignore[arg-type]
     )
 
-    assert updated.title == "Новое название"
+    assert updated.description == "Новое название"
 
 
 @pytest.mark.parametrize("status", [EventCardStatus.PUBLISHED, EventCardStatus.FULL])
@@ -375,7 +377,7 @@ async def test_update_after_join_is_rejected(status: EventCardStatus) -> None:
             _FakeSession(),  # type: ignore[arg-type]
             author_id=7,
             card_uuid=CARD_UUID,
-            payload=EventCardUpdate(title="Новое"),
+            payload=EventCardUpdate(description="Новое"),
             settings=_Settings(),  # type: ignore[arg-type]
             now=NOW,
             repository=_StateRepository(card),  # type: ignore[arg-type]
@@ -403,7 +405,7 @@ async def test_update_terminal_card_is_not_editable(status: EventCardStatus) -> 
             _FakeSession(),  # type: ignore[arg-type]
             author_id=7,
             card_uuid=CARD_UUID,
-            payload=EventCardUpdate(title="Новое"),
+            payload=EventCardUpdate(description="Новое"),
             settings=_Settings(),  # type: ignore[arg-type]
             now=NOW,
             repository=_StateRepository(card),  # type: ignore[arg-type]
@@ -429,7 +431,7 @@ async def test_update_published_with_stop_word_changes_nothing() -> None:
             _FakeSession(),  # type: ignore[arg-type]
             author_id=7,
             card_uuid=CARD_UUID,
-            payload=EventCardUpdate(title="Казино на районе"),
+            payload=EventCardUpdate(description="Казино на районе"),
             settings=_Settings(),  # type: ignore[arg-type]
             now=NOW,
             repository=_StateRepository(card),  # type: ignore[arg-type]
@@ -453,13 +455,13 @@ async def test_update_draft_with_stop_word_keeps_edit_but_goes_pending() -> None
         _FakeSession(),  # type: ignore[arg-type]
         author_id=7,
         card_uuid=CARD_UUID,
-        payload=EventCardUpdate(title="Казино на районе"),
+        payload=EventCardUpdate(description="Казино на районе"),
         settings=_Settings(),  # type: ignore[arg-type]
         now=NOW,
         repository=_StateRepository(card),  # type: ignore[arg-type]
     )
 
-    assert updated.title == "Казино на районе"
+    assert updated.description == "Казино на районе"
     assert updated.verification_status == "pending"
 
 
@@ -515,7 +517,10 @@ async def test_update_without_description_keeps_it() -> None:
         _FakeSession(),  # type: ignore[arg-type]
         author_id=7,
         card_uuid=CARD_UUID,
-        payload=EventCardUpdate(title="Новое название"),
+        # Стори 13.2 (AC-7): `title` из контракта удалён, поэтому «правка
+        # другого поля» передаётся через `capacity` — оно точно не описание,
+        # и смысл теста сохранён: не переданное поле не затирается.
+        payload=EventCardUpdate(capacity=2),
         settings=_Settings(),  # type: ignore[arg-type]
         now=NOW,
         repository=_StateRepository(card),  # type: ignore[arg-type]
@@ -605,11 +610,11 @@ async def test_patch_published_does_not_extend_decision_window() -> None:
         _FakeSession(),  # type: ignore[arg-type]
         author_id=7,
         card_uuid=CARD_UUID,
-        payload=EventCardUpdate(title="Только заголовок"),
+        payload=EventCardUpdate(description="Только заголовок"),
         settings=_Settings(),  # type: ignore[arg-type]
         now=NOW,
         repository=_StateRepository(card),  # type: ignore[arg-type]
     )
 
     assert updated.expires_at == old_expires
-    assert updated.title == "Только заголовок"
+    assert updated.description == "Только заголовок"

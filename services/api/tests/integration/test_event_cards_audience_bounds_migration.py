@@ -39,6 +39,11 @@ from tests.conftest import HEAD_REVISION
 
 pytestmark = [
     pytest.mark.integration,
+    # Стори 13.2 (P-32): файл исполняет `alembic upgrade/downgrade`
+    # сабпроцессом и откатывает ОБЩУЮ схему. Маркер обязателен: под xdist
+    # хук `tests/integration/conftest.py` превращает его в `skip`, иначе
+    # чужой воркер прочитает таблицу, которую мы откатили.
+    pytest.mark.ddl,
     pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="нужен DATABASE_URL"),
 ]
 

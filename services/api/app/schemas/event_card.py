@@ -99,7 +99,13 @@ class EventCardCreate(BaseModel):
     # а не отбрасываются молча.
     model_config = ConfigDict(extra="forbid")
 
-    title: str = Field(min_length=1, max_length=TITLE_MAX_LENGTH)
+    # AC-7 стори 13.2 (FR130, ADR-26): заголовок не вводится автором — его
+    # собирает сервер из активности и места. Поле ОСТАЛОСЬ в модели, потому
+    # что легаси-карточки с `activity='other'` приходят с заголовком от
+    # клиента (AC-6), но для остальных активностей передача `title` — ошибка.
+    # Отвергает её валидатор `_reject_author_title` ниже, а не `extra="forbid"`:
+    # `forbid` запретил бы и легаси-путь.
+    title: str | None = Field(default=None, min_length=1, max_length=TITLE_MAX_LENGTH)
     # AC-01: описание необязательно. `None`, а не `""` — project-context §4:
     # пустое значение передаётся как `null`.
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX_LENGTH)
@@ -143,6 +149,32 @@ class EventCardCreate(BaseModel):
     def _no_legacy_activity(cls, value: object) -> object:
         """AC-3 стори 12.4: `other` — легаси БД, не выбор автора."""
         return reject_legacy_activity(value)
+
+    @model_validator(mode="after")
+    def _reject_author_title(self) -> EventCardCreate:
+        """AC-7 стори 13.2 (FR130, ADR-26): автор не присылает заголовок.
+
+        **Почему валидатор, а не `extra="forbid"`.** `extra="forbid"` не
+        сработает: поле `title` объявлено в модели, значит оно «известное».
+        Убрать объявление нельзя — легаси-карточки с `activity='other'`
+        приходят с заголовком (AC-6), и сервис читает `payload.title`
+        единообразно. Поэтому запрет выражен явно: значение, отличное от
+        `None`, — ошибка `422`, а не тихий выброс.
+
+        **Почему это не ломает легаси.** `_no_legacy_activity` выше отвергает
+        `Activity.OTHER` на этом же входе, значит легаси-ветка через HTTP
+        недостижима вовсе. Легаси-строки попадают в БД мимо Pydantic (импорт,
+        сырой `INSERT` воркера) и через этот валидатор не проходят.
+        """
+        # Отвергается ФАКТ передачи поля, а не значение: `title: null` — тоже
+        # попытка управлять полем, и клиент должен узнать о запрете, а не
+        # получить молчаливый выброс с пустым заголовком на сервере.
+        if "title" in self.model_fields_set:
+            raise ValueError(
+                "title_not_accepted: заголовок генерируется сервером из активности "
+                "и места (FR130). Автор его не вводит."
+            )
+        return self
 
     @field_validator("title", mode="before")
     @classmethod
@@ -319,7 +351,11 @@ class EventCardUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, min_length=1, max_length=TITLE_MAX_LENGTH)
+    # AC-7 стори 13.2 (FR130, ADR-26): поля `title` здесь НЕТ — заголовок не
+    # редактируется автором, он следует за активностью и местом. Поле удалено
+    # из модели, а не «принимается и игнорируется»: `extra="forbid"` даёт
+    # `422` на `PATCH {"title": ...}`, и клиент узнаёт, что действие
+    # запрещено, вместо тихой потери правки.
     description: str | None = Field(default=None, max_length=DESCRIPTION_MAX_LENGTH)
     category: PlaceCategory | None = None
     place_uuid: uuid_lib.UUID | None = None
@@ -360,16 +396,6 @@ class EventCardUpdate(BaseModel):
         if self.age_min is not None and self.age_max is not None and self.age_min > self.age_max:
             raise ValueError("age_range_invalid")
         return self
-
-    @field_validator("title", mode="before")
-    @classmethod
-    def _strip_title(cls, value: object) -> object:
-        """AC-05: заголовок нормализуется тем же кодом, что при создании.
-
-        Две разные нормализации дали бы «одинаковый» заголовок, который
-        проходит `POST` и падает `CHECK`-ом на `PATCH`.
-        """
-        return _normalize(value)
 
     @field_validator("description", mode="before")
     @classmethod

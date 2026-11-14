@@ -38,6 +38,14 @@ logger = structlog.get_logger(__name__)
 # - карточка не годится: обход — подавать по одной заявке на разные карточки.
 _KEY_PREFIX = "join_request:submit:"
 
+# Стори 13.1 (AC-6, Task 2.3): префикс стал параметром, и это не косметика.
+# Второй потребитель — лимит адресного поиска — пишет в Redis тем же классом.
+# Общий литерал означал бы, что `INCR` поиска расходует суточный лимит подач:
+# участник, набравший адрес в форме карточки, терял бы возможность подать
+# заявку. Дефолт сохранён дословно: на стенде уже лежат исчерпанные счётчики
+# по имени `join_request:submit:<id>`, и смена дефолта молча обнулила бы
+# анти-абьюз на деплое.
+
 
 class RateLimiter(Protocol):
     """AC-10: минимум, который нужен роутеру. Реализация подставляется в тестах.
@@ -53,11 +61,23 @@ class RateLimiter(Protocol):
 class JoinRequestRateLimiter:
     """AC-10: fixed-window счётчик подач по аккаунту."""
 
-    def __init__(self, *, limit: int, window_seconds: int) -> None:
+    def __init__(self, *, limit: int, window_seconds: int, key_prefix: str = _KEY_PREFIX) -> None:
         """Значения приходят из настроек (`join_request_rate_*`), не из литералов:
-        FR61 требует менять поведение без правок кода."""
+        FR61 требует менять поведение без правок кода.
+
+        `key_prefix` (стори 13.1, AC-6) — пространство имён счётчика. Дефолт
+        совпадает с прежним литералом дословно: на стенде лежат исчерпанные
+        ключи `join_request:submit:<id>`, и смена дефолта молча обнулила бы
+        анти-абьюз на деплое.
+
+        Пустой префикс отвергается: ключ стал бы голым числом аккаунта и
+        пересекался бы с любым другим лимитом по тому же числу.
+        """
+        if not key_prefix:
+            raise ValueError("key_prefix не может быть пустым: ключ станет безымянным")
         self._limit = limit
         self._window = window_seconds
+        self._key_prefix = key_prefix
 
     async def hit(self, applicant_id: int) -> int | None:
         """AC-10: инкремент счётчика; `None` — можно, число — `retry_after`.
@@ -71,7 +91,7 @@ class JoinRequestRateLimiter:
         домена. Легальное действие не должно падать из-за недоступного
         хранилища (ADR-11); факт сбоя логируется, лимит пропускается.
         """
-        key = f"{_KEY_PREFIX}{applicant_id}"
+        key = f"{self._key_prefix}{applicant_id}"
         try:
             client = get_redis()
             await client.set(key, 0, ex=self._window, nx=True)
